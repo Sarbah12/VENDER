@@ -1,0 +1,429 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * The brief asks for modern, simple, reliable and fast — a tool someone stands
+ * in front of for eight hours. So: a quiet neutral canvas, one confident red
+ * reserved for the primary action and nothing else, generous hit targets, and
+ * numerals that line up in columns.
+ */
+:root {
+  --canvas: #f3f4f7;
+  --surface: #ffffff;
+  --surface-2: #f8f9fb;
+  --surface-3: #eef0f4;
+  --border: #e2e5ea;
+  --border-strong: #ccd1d9;
+
+  --text: #0f1218;
+  --text-muted: #5c6675;
+  --text-faint: #8b94a3;
+  --text-inverse: #ffffff;
+
+  --brand: #d81f26;
+  --brand-hover: #b8161d;
+  --brand-soft: #fdecec;
+  --brand-ring: rgba(216, 31, 38, 0.32);
+
+  --positive: #0b7a45;
+  --positive-soft: #e6f4ec;
+  --warning: #a4600a;
+  --warning-soft: #fdf1de;
+  --danger: #c62d24;
+  --danger-soft: #fdeceb;
+  --info: #1d4ed8;
+  --info-soft: #e8eeff;
+
+  --shadow-sm: 0 1px 2px rgba(15, 18, 24, 0.06);
+  --shadow-md: 0 4px 16px rgba(15, 18, 24, 0.08);
+  --shadow-lg: 0 18px 48px rgba(15, 18, 24, 0.16);
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --radius-lg: 18px;
+
+  /*
+   * Chrome — the dark rail and coloured top bar of the reference layout.
+   * Held separately from the content palette so the shell can take on the real
+   * brand colours without touching a single page.
+   */
+  --nav-bg: #1f272b;
+  --nav-bg-sub: #171e21;
+  --nav-bg-hover: #2a3439;
+  --nav-bg-active: #2f3a40;
+  --nav-bg-top: #c01a20;
+  --nav-fg: #b3bec5;
+
+  /*
+   * Quick-link tile palette. Distinct hues, all carrying white text at ≥4.5:1,
+   * so a tile is identifiable at a glance from across the counter.
+   */
+  --tile-1: #d0392f;
+  --tile-2: #c2570f;
+  --tile-3: #b07d00;
+  --tile-4: #0e8a4f;
+  --tile-5: #1668b8;
+  --tile-6: #6b4fbb;
+  --tile-7: #0f7f88;
+  --tile-8: #33414d;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: #0a0b0e;
+    --surface: #131519;
+    --surface-2: #181a20;
+    --surface-3: #21242b;
+    --border: #262a32;
+    --border-strong: #39404b;
+
+    --text: #eceff4;
+    --text-muted: #98a2b3;
+    --text-faint: #6b7482;
+    --text-inverse: #ffffff;
+
+    --brand: #f0524d;
+    --brand-hover: #ff6b66;
+    --brand-soft: #2b1416;
+    --brand-ring: rgba(240, 82, 77, 0.35);
+
+    --positive: #35c07d;
+    --positive-soft: #10231a;
+    --warning: #e0a340;
+    --warning-soft: #241c0e;
+    --danger: #f4635a;
+    --danger-soft: #2a1413;
+    --info: #7aa2ff;
+    --info-soft: #131a2e;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 18px 48px rgba(0, 0, 0, 0.6);
+
+    --nav-bg: #14181b;
+    --nav-bg-sub: #0f1214;
+    --nav-bg-hover: #1e2429;
+    --nav-bg-active: #242c31;
+    --nav-bg-top: #1a1f23;
+    --nav-fg: #9aa5ad;
+
+    --tile-1: #b5322a;
+    --tile-2: #a44a0d;
+    --tile-3: #8f6600;
+    --tile-4: #0c7343;
+    --tile-5: #14589c;
+    --tile-6: #5a43a0;
+    --tile-7: #0d6b73;
+    --tile-8: #2b3740;
+  }
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--border);
+  --color-line-strong: var(--border-strong);
+
+  --color-ink: var(--text);
+  --color-muted: var(--text-muted);
+  --color-faint: var(--text-faint);
+
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-soft: var(--brand-soft);
+
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --radius-card: var(--radius);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  /* A till is not a document — the page should never rubber-band under a thumb. */
+  overscroll-behavior: none;
+}
+
+/* Money and quantities are read in columns, so their digits must be too. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+/* ───────────────────────────── Components ──────────────────────────────── */
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1;
+  padding: 0.6875rem 1rem;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease,
+    transform 60ms ease;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
+.btn-primary {
+  background: var(--brand);
+  color: #fff;
+}
+.btn-primary:hover:not(:disabled) {
+  background: var(--brand-hover);
+}
+
+.btn-secondary {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+.btn-secondary:hover:not(:disabled) {
+  background: var(--surface-3);
+}
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-color: transparent;
+}
+.btn-danger:hover:not(:disabled) {
+  background: var(--danger);
+  color: #fff;
+}
+
+.input {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 0.625rem 0.75rem;
+  font-size: 0.9375rem;
+  color: var(--text);
+  transition: border-color 120ms ease, box-shadow 120ms ease;
+}
+
+.input::placeholder {
+  color: var(--text-faint);
+}
+
+.input:focus {
+  outline: none;
+  border-color: var(--brand);
+  box-shadow: 0 0 0 3px var(--brand-ring);
+}
+
+.label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  margin-bottom: 0.375rem;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.5rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* Data tables. Dense, quiet rules, numerals right-aligned and tabular. */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+}
+
+.table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  padding: 0.625rem 0.875rem;
+  text-align: left;
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+
+.table tbody td {
+  border-bottom: 1px solid var(--border);
+  padding: 0.6875rem 0.875rem;
+  vertical-align: middle;
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tbody tr:hover td {
+  background: var(--surface-2);
+}
+
+.table .num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+/* Scrollbars that do not shout in a full-screen till view. */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+.scroll-slim::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.animate-rise {
+  animation: rise 160ms ease-out;
+}
+
+/*
+ * Printing a receipt means printing the receipt — not the till around it. Thermal
+ * printers are typically 58mm or 80mm, so the page is sized to the narrow one and
+ * everything else is removed from the flow rather than merely hidden.
+ */
+@media print {
+  @page {
+    size: 80mm auto;
+    margin: 4mm;
+  }
+
+  body {
+    background: #fff;
+    color: #000;
+  }
+
+  /*
+   * Hide by visibility rather than display: the receipt's ancestors have to keep
+   * laying out for it to have a box at all, but nothing of them should show.
+   */
+  body:has(.receipt) * {
+    visibility: hidden;
+  }
+
+  .receipt,
+  .receipt * {
+    visibility: visible !important;
+  }
+
+  .receipt {
+    position: absolute !important;
+    inset: 0 auto auto 0;
+    overflow: visible !important;
+    max-height: none !important;
+    width: 100% !important;
+    padding: 0 !important;
+    color: #000 !important;
+    font-size: 11px !important;
+  }
+
+  .receipt .text-muted,
+  .receipt [class*="text-muted"] {
+    color: #333 !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
