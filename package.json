@@ -14,7 +14,8 @@
     "smoke": "PGLITE_DIR=.data/smoke NODE_OPTIONS=--conditions=react-server tsx scripts/smoke.ts",
     "test": "tsx --test src/domain/*.test.ts",
     "db:migrate": "NODE_OPTIONS=--conditions=react-server tsx scripts/migrate.ts",
-    "db:seed:demo": "NODE_OPTIONS=--conditions=react-server tsx scripts/seed.ts"
+    "db:seed:demo": "NODE_OPTIONS=--conditions=react-server tsx scripts/seed.ts",
+    "db:ping": "NODE_OPTIONS=--conditions=react-server tsx scripts/db-ping.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.7",

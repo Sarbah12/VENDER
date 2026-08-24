@@ -29,35 +29,72 @@ perfectly good second choice if you would rather keep one platform.
 
 ## Option 1 — Supabase + Vercel (recommended)
 
-**Database (Supabase)**
+### Connecting this app to Supabase
 
-1. Create a project. Pick the region closest to your shops — check the current
-   region list when you create it; Supabase has European and African regions,
-   and the closest one to Ghana will beat a US one noticeably.
-2. Set a strong database password and save it.
-3. From *Project Settings → Database*, copy two connection strings:
-   - the **Transaction pooler** URL (port `6543`) → this is `DATABASE_URL`
-   - the **Direct connection** URL (port `5432`) → this is `DIRECT_DATABASE_URL`
-4. Turn on **Point-in-Time Recovery** if you are on a paid plan. On the free
-   plan, take your own periodic `pg_dump` — see *Backups* below.
+**Ignore the "Framework → Next.js" tab in the Connect dialog.** It installs
+`@supabase/supabase-js` and `@supabase/ssr` and hands you a publishable key.
+This app needs none of that — it speaks Postgres directly through Drizzle, with
+its own schema, its own migrations and its own session cookie. Supabase is being
+used purely as a well-run Postgres.
 
-You do not need Supabase Auth, Storage, or its client libraries. This app talks
-to Postgres directly with its own schema and its own session handling; Supabase
-is being used purely as a well-run Postgres.
+The tab you want is **Connect → Direct → Connection string**. Copy two URLs
+from it:
 
-**App (Vercel)**
+| Supabase calls it | Port | Goes in | Why |
+| --- | --- | --- | --- |
+| **Transaction pooler** | `6543` | `DATABASE_URL` | What the app uses. Handles many short-lived connections; prepared statements are disabled automatically because backends rotate between statements. |
+| **Session pooler** | `5432` | `DIRECT_DATABASE_URL` | What migrations use. Holds one backend for the whole connection, so DDL works — and it reaches Supabase over IPv4. |
+
+Both pooled URLs use `postgres.PROJECT_REF` as the username, not plain
+`postgres`. Getting that wrong produces `Tenant or user not found`.
+
+> **Why not "Direct connection"?** On the free plan that host resolves to IPv6
+> only. If your network or host is IPv4 — most are — it fails with `ENETUNREACH`.
+> The session pooler does the same job over IPv4.
+
+### Steps
+
+```bash
+cp .env.local.template .env.local
+# fill in the two passwords and SESSION_SECRET, then:
+openssl rand -base64 32     # paste the output as SESSION_SECRET
+
+npm run db:ping             # confirms it connects; prints no credentials
+npm run db:migrate          # creates the schema
+npm run dev                 # visit /setup to create your business
+```
+
+`db:ping` reports what it found and names the likely cause if it fails. It never
+prints the connection string.
+
+### Free plan: two things to fix before a real shop uses this
+
+Your project is on the free plan with `nano` compute, and the dashboard shows
+**"Last backup: No backups"**. Both matter for a till:
+
+- **Free projects pause after about a week of inactivity.** A paused database is
+  a till that will not open. Fine while you are building; not acceptable once a
+  shop depends on it.
+- **No point-in-time recovery on free.** The database holds the only record of
+  what was sold and what is on the shelf.
+
+The Pro plan (about $25/month) removes the pausing and adds daily backups with
+retention. If you would rather stay on free for now, take your own dumps — see
+*Backups* below — and treat the pause as a known risk.
+
+`nano` compute is genuinely fine to start; a single shop will not trouble it.
+
+### App (Vercel)
 
 1. Push this repository to GitHub and import it on Vercel.
-2. Add environment variables: `DATABASE_URL`, `DIRECT_DATABASE_URL`,
-   `SESSION_SECRET` (generate with `openssl rand -base64 32`).
-3. Set the build command to `npm run db:migrate && npm run build` so each deploy
-   applies pending migrations before the new version serves traffic.
+2. Add the same three environment variables: `DATABASE_URL`,
+   `DIRECT_DATABASE_URL`, `SESSION_SECRET`.
+3. Set the build command to `npm run db:migrate && npm run build`, so every
+   deploy applies pending migrations before the new version serves traffic.
 
 Vercel runs each request in a short-lived instance, so the app opens **one**
-connection per instance and turns off prepared statements when it detects a
-pooler — both handled automatically in `src/db/client.ts`. Use the pooled URL
-for the app and the direct URL only for migrations; a transaction pooler cannot
-run the DDL that migrations need.
+connection per instance and disables prepared statements on the transaction
+pooler — both handled in `src/db/client.ts`, nothing to configure.
 
 ---
 

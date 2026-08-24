@@ -104,12 +104,18 @@ const globalCache = globalThis as unknown as { __venderDb?: Cache };
  * pooler from the URL and turning them off is the difference between "works
  * locally, fails in production" and just working.
  */
-export function poolSettings(url: string): { max: number; prepare: boolean; pooled: boolean } {
-  const pooled =
-    url.includes(":6543") ||
-    url.includes("pooler.supabase") ||
-    url.includes("-pooler.") ||
-    url.includes("pgbouncer=true");
+export function poolSettings(url: string): {
+  max: number;
+  prepare: boolean;
+  /** Transaction-mode pooling: statements are not tied to one backend. */
+  transactionPooled: boolean;
+} {
+  // The two Supabase pooler modes behave very differently and must not be
+  // lumped together. Transaction mode (port 6543) rotates backends between
+  // statements, so prepared statements and session-level DDL both break.
+  // Session mode (port 5432 on the pooler host) holds one backend for the whole
+  // connection and is fine for everything, including migrations.
+  const transactionPooled = url.includes(":6543") || url.includes("pgbouncer=true");
 
   // Serverless runtimes start many short-lived instances; a big pool per
   // instance exhausts the database's connection limit long before it helps.
@@ -118,8 +124,8 @@ export function poolSettings(url: string): { max: number; prepare: boolean; pool
 
   return {
     max: Number.isFinite(configured) && configured > 0 ? configured : serverless ? 1 : 10,
-    prepare: !pooled,
-    pooled,
+    prepare: !transactionPooled,
+    transactionPooled,
   };
 }
 

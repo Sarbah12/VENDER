@@ -30,8 +30,12 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — real ones never, templates always.
+# The templates hold placeholders only; keeping them tracked is what stops
+# someone guessing at variable names and pasting a password into the wrong file.
 .env*
+!.env.example
+!.env.local.template
 
 # vercel
 .vercel

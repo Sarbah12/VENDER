@@ -27,12 +27,15 @@ async function main() {
     import("../src/db/client"),
   ]);
 
-  const { prepare, pooled } = poolSettings(url);
-  if (pooled) {
-    console.warn(
-      "Warning: this looks like a pooled connection string. Migrations want the direct " +
-        "database URL — a transaction pooler cannot run the DDL session Drizzle needs.",
+  const { prepare, transactionPooled } = poolSettings(url);
+  if (transactionPooled) {
+    console.error(
+      "This is a transaction-pooled connection string (port 6543). Migrations need a session:\n" +
+        "  • Supabase — use the Session pooler URL (port 5432 on the pooler host), or the\n" +
+        "    Direct connection if your network has IPv6.\n" +
+        "  • Set it as DIRECT_DATABASE_URL and leave DATABASE_URL on 6543 for the app.",
     );
+    process.exit(1);
   }
 
   // One connection, and no pool to leave hanging when the script ends.
