@@ -4,7 +4,9 @@ import { redirect } from "next/navigation";
 import { getDb } from "@/db/client";
 import { categories, products } from "@/db/schema";
 import { formatMoney } from "@/lib/money";
+import { can } from "@/server/authz";
 import { getShopContext } from "@/server/context";
+import { NewCategoryForm } from "./NewCategoryForm";
 
 export const metadata = { title: "Categories" };
 export const dynamic = "force-dynamic";
@@ -33,8 +35,11 @@ export default async function CategoriesPage() {
     .orderBy(asc(categories.sortOrder));
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-      {rows.map((row) => (
+    <div className="space-y-5">
+      {can(context.employee, "catalogue:write") && <NewCategoryForm />}
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+        {rows.map((row) => (
         <article key={row.id} className="card overflow-hidden">
           <div
             aria-hidden
@@ -53,8 +58,9 @@ export default async function CategoriesPage() {
               <Stat label="Dearest" value={formatMoney(Number(row.dearest), currency)} />
             </dl>
           </div>
-        </article>
-      ))}
+          </article>
+        ))}
+      </div>
     </div>
   );
 }

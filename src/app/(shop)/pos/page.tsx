@@ -1,8 +1,9 @@
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 
 import { getDb } from "@/db/client";
-import { categories, customers, products, stockLevels } from "@/db/schema";
+import { customers } from "@/db/schema";
+import { catalogueSize, listCategories, searchCatalogue } from "@/server/catalogue";
 import { getShopContext, isSignedIn } from "@/server/context";
 import { PosTerminal } from "./PosTerminal";
 import type { PosProduct } from "./types";
@@ -12,6 +13,17 @@ export const metadata = { title: "Point of Sale" };
 // A till must always show current stock, never a cached shelf from ten minutes ago.
 export const dynamic = "force-dynamic";
 
+/**
+ * Below this many products the till holds the whole catalogue in memory, so
+ * browsing and searching are instant and survive a brief network drop. Above it,
+ * shipping every row to a tablet would cost megabytes and seconds, so the till
+ * loads a slice and asks the server as the cashier types.
+ */
+export const POS_FULL_LOAD_LIMIT = 1500;
+
+/** How many products to show for browsing when the catalogue is too big to hold. */
+const BROWSE_SLICE = 300;
+
 export default async function PosPage() {
   const context = await getShopContext();
   if (!context) redirect("/setup");
@@ -20,41 +32,25 @@ export default async function PosPage() {
   const db = await getDb();
   const warehouseId = context.register?.warehouseId ?? context.warehouse.id;
 
-  const [catalogue, customerRows] = await Promise.all([
-    db
-      .select({
-        id: products.id,
-        name: products.name,
-        sku: products.sku,
-        barcode: products.barcode,
-        unit: products.unit,
-        sellPrice: products.sellPrice,
-        taxRateBp: products.taxRateBp,
-        trackStock: products.trackStock,
-        allowNegativeStock: products.allowNegativeStock,
-        stock: stockLevels.quantity,
-        categoryId: categories.id,
-        categoryName: categories.name,
-        categoryColour: categories.colour,
-        categorySort: categories.sortOrder,
-      })
-      .from(products)
-      .leftJoin(categories, eq(categories.id, products.categoryId))
-      .leftJoin(
-        stockLevels,
-        and(eq(stockLevels.productId, products.id), eq(stockLevels.warehouseId, warehouseId)),
-      )
-      .where(and(eq(products.businessId, context.business.id), eq(products.isActive, true)))
-      .orderBy(asc(categories.sortOrder), asc(products.name)),
+  const size = await catalogueSize(context.business.id);
+  const holdsEverything = size <= POS_FULL_LOAD_LIMIT;
 
+  const [catalogue, categoryRows, customerRows] = await Promise.all([
+    searchCatalogue({
+      businessId: context.business.id,
+      warehouseId,
+      limit: holdsEverything ? POS_FULL_LOAD_LIMIT : BROWSE_SLICE,
+    }),
+    listCategories(context.business.id),
     db
       .select({ id: customers.id, name: customers.name, phone: customers.phone })
       .from(customers)
       .where(eq(customers.businessId, context.business.id))
-      .orderBy(asc(customers.name)),
+      .orderBy(asc(customers.name))
+      .limit(500),
   ]);
 
-  const items: PosProduct[] = catalogue.map((p) => ({
+  const items: PosProduct[] = catalogue.rows.map((p) => ({
     id: p.id,
     name: p.name,
     sku: p.sku,
@@ -65,15 +61,23 @@ export default async function PosPage() {
     taxRateBp: p.taxRateBp ?? context.business.taxRateBp,
     trackStock: p.trackStock,
     allowNegativeStock: p.allowNegativeStock,
-    stock: Number(p.stock ?? 0),
+    stock: p.stock,
     categoryId: p.categoryId,
-    categoryName: p.categoryName ?? "Uncategorised",
+    categoryName: p.categoryName,
     categoryColour: p.categoryColour,
   }));
 
   return (
     <PosTerminal
       products={items}
+      categories={categoryRows.map((c) => ({
+        id: c.id,
+        name: c.name,
+        colour: c.colour,
+        count: c.products,
+      }))}
+      catalogueSize={size}
+      holdsEverything={holdsEverything}
       customers={customerRows}
       currencyCode={context.business.currencyCode}
       pricesIncludeTax={context.business.pricesIncludeTax}

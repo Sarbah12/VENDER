@@ -4,12 +4,9 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import { getDb, type Database } from "@/db/client";
 import {
-  accounts,
   businesses,
   customers,
   counters,
-  journalEntries,
-  journalLines,
   payments as paymentsTable,
   products as productsTable,
   registers,
@@ -19,9 +16,10 @@ import {
   stockMovements,
   type PaymentMethod,
 } from "@/db/schema";
-import { PAYMENT_ACCOUNT, PAYMENT_LABEL, type SystemAccountKey } from "@/domain/accounts";
+import { PAYMENT_ACCOUNT, PAYMENT_LABEL } from "@/domain/accounts";
 import { priceLine, settle, totalsFor, type PricedLine } from "@/domain/pricing";
 import { roundHalfAwayFromZero, roundQty, type Minor } from "@/lib/money";
+import { LedgerError, postJournal, type JournalDraftLine } from "./ledger";
 
 export type SaleLineInput = {
   productId: string;
@@ -342,8 +340,6 @@ async function runRecordSale(tx: Database, input: RecordSaleInput): Promise<Reco
 
 /* ─────────────────────────────── Ledger posting ────────────────────────── */
 
-type LedgerLine = { key: SystemAccountKey; debit: Minor; credit: Minor; memo: string };
-
 async function postSaleToLedger(
   tx: Database,
   args: {
@@ -358,7 +354,7 @@ async function postSaleToLedger(
     tenders: Array<{ method: PaymentMethod; applied: Minor }>;
   },
 ) {
-  const draft: LedgerLine[] = [];
+  const draft: JournalDraftLine[] = [];
 
   // Money in, by tender type.
   for (const tender of args.tenders) {
@@ -426,50 +422,27 @@ async function postSaleToLedger(
     });
   }
 
-  const totalDebit = draft.reduce((a, l) => a + l.debit, 0);
-  const totalCredit = draft.reduce((a, l) => a + l.credit, 0);
-  if (totalDebit !== totalCredit) {
-    // Refusing to post an unbalanced entry means the books can never silently
-    // drift; a rounding bug shows up as a failed sale, not a wrong balance sheet.
-    throw new SaleError(
-      "unbalanced_ledger",
-      `Journal for ${args.number} is out by ${totalDebit - totalCredit}.`,
-    );
-  }
-
-  const accountIds = await systemAccountIds(tx, args.businessId);
-  const [entry] = await tx
-    .insert(journalEntries)
-    .values({
+  try {
+    await postJournal(tx, {
       businessId: args.businessId,
       branchId: args.branchId,
       entryDate: args.entryDate,
       memo: `Sale ${args.number}`,
       refType: "sale",
       refId: args.saleId,
-    })
-    .returning({ id: journalEntries.id });
-
-  await tx.insert(journalLines).values(
-    draft.map((line) => {
-      const accountId = accountIds.get(line.key);
-      if (!accountId) {
-        throw new SaleError("missing_accounts", `Chart of accounts is missing "${line.key}".`);
-      }
-      return { entryId: entry.id, accountId, debit: line.debit, credit: line.credit, memo: line.memo };
-    }),
-  );
-}
-
-async function systemAccountIds(tx: Database, businessId: string) {
-  const rows = await tx
-    .select({ id: accounts.id, systemKey: accounts.systemKey })
-    .from(accounts)
-    .where(eq(accounts.businessId, businessId));
-
-  return new Map(
-    rows.filter((r) => r.systemKey).map((r) => [r.systemKey as SystemAccountKey, r.id]),
-  );
+      lines: draft,
+    });
+  } catch (error) {
+    // Restate as a SaleError so the till shows a sale-shaped message rather than
+    // an accounting one, while still refusing to complete the sale.
+    if (error instanceof LedgerError) {
+      throw new SaleError(
+        error.code === "unbalanced" ? "unbalanced_ledger" : "missing_accounts",
+        error.message,
+      );
+    }
+    throw error;
+  }
 }
 
 /* ────────────────────────────── Numbering ──────────────────────────────── */

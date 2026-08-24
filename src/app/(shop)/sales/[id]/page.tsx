@@ -3,6 +3,7 @@ import { ArrowLeft, Boxes, Receipt as ReceiptIcon, Wallet } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 
+import { ThermalReceipt, receiptToView } from "@/components/receipt/ThermalReceipt";
 import { getDb } from "@/db/client";
 import { accounts, journalEntries, journalLines, products, stockMovements } from "@/db/schema";
 import { PAYMENT_LABEL } from "@/domain/accounts";
@@ -10,6 +11,7 @@ import { formatDateTime } from "@/lib/datetime";
 import { formatMoney, formatQty } from "@/lib/money";
 import { getShopContext } from "@/server/context";
 import { getReceipt } from "@/server/receipts";
+import { PrintReceiptButton } from "./PrintReceiptButton";
 
 export const dynamic = "force-dynamic";
 
@@ -70,12 +72,23 @@ export default async function SaleDetailPage({
 
   return (
     <div className="space-y-5">
-      <Link
-        href="/sales"
-        className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold text-muted hover:text-brand"
-      >
-        <ArrowLeft size={15} /> All sales
-      </Link>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Link
+          href="/sales"
+          className="inline-flex items-center gap-1.5 text-[0.8125rem] font-semibold text-muted hover:text-brand"
+        >
+          <ArrowLeft size={15} /> All sales
+        </Link>
+        <PrintReceiptButton />
+      </div>
+
+      {/*
+        The printable artefact. Hidden on screen — the page already shows the
+        sale in a fuller layout — but it is what the print stylesheet keeps.
+      */}
+      <div className="hidden print:block">
+        <ThermalReceipt view={receiptToView(receipt, { reprint: true })} />
+      </div>
 
       <div className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         {/* ── The receipt ─────────────────────────────────────────────── */}

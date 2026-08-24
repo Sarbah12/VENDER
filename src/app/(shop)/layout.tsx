@@ -5,6 +5,10 @@ import { brand } from "@/lib/brand";
 import { getShopContext, isSignedIn } from "@/server/context";
 import { signOut } from "./actions";
 
+// Every page under this shell reads the session and the shop it belongs to, so
+// none of them can be prerendered — and the build must not need a database.
+export const dynamic = "force-dynamic";
+
 export default async function ShopLayout({ children }: LayoutProps<"/">) {
   const context = await getShopContext();
   if (!context) redirect("/setup");

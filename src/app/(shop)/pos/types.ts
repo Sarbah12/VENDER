@@ -14,6 +14,14 @@ export type PosProduct = {
   categoryColour: string | null;
 };
 
+export type PosCategory = {
+  id: string;
+  name: string;
+  colour: string | null;
+  /** Products in this category across the whole catalogue, not just what is loaded. */
+  count: number;
+};
+
 export type PosCustomer = { id: string; name: string; phone: string | null };
 
 export type CartLine = {

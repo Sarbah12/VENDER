@@ -3,21 +3,14 @@
 import { CheckCircle2, CloudOff, Printer } from "lucide-react";
 import { useEffect, useRef } from "react";
 
-import { formatDateTime } from "@/lib/datetime";
-import { formatMoney, formatQty } from "@/lib/money";
-import { PAYMENT_LABEL } from "@/domain/accounts";
+import {
+  ThermalReceipt,
+  receiptToView,
+  type ReceiptView,
+} from "@/components/receipt/ThermalReceipt";
+import { formatMoney } from "@/lib/money";
 import type { Receipt } from "@/server/receipts";
 import type { Tender } from "./types";
-
-type PrintLine = {
-  name: string;
-  unit: string;
-  quantity: number;
-  lineTotal: number;
-  /** null for a queued sale, where the server has not priced it back yet. */
-  unitPrice: number | null;
-  discountAmount: number;
-};
 
 export type OfflineReceipt = {
   lines: Array<{ name: string; unit: string; quantity: number; lineTotal: number }>;
@@ -31,15 +24,50 @@ export function ReceiptDialog({
   offline,
   currencyCode,
   shopName,
+  autoPrint,
+  onToggleAutoPrint,
   onClose,
 }: {
   receipt: Receipt | null;
   offline: OfflineReceipt | null;
   currencyCode: string;
   shopName: string;
+  autoPrint: boolean;
+  onToggleAutoPrint: (value: boolean) => void;
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement>(null);
+  const printedFor = useRef<string | null>(null);
+
+  const view: ReceiptView = receipt
+    ? receiptToView(receipt)
+    : {
+        heading: shopName,
+        number: null,
+        soldAt: offline!.queuedAt,
+        currencyCode,
+        lines: offline!.lines.map((line) => ({
+          name: line.name,
+          unit: line.unit,
+          quantity: line.quantity,
+          lineTotal: line.lineTotal,
+          unitPrice: null,
+          discountAmount: 0,
+        })),
+        // A queued sale has not been re-priced by the server, so the till only
+        // claims the total it collected — not a tax breakdown it cannot vouch for.
+        subtotal: null,
+        discountTotal: 0,
+        taxTotal: 0,
+        total: offline!.total,
+        payments: offline!.tenders.map((t) => ({
+          method: t.method,
+          amount: t.amount,
+          reference: t.reference,
+        })),
+        changeGiven: 0,
+        balanceDue: 0,
+      };
 
   useEffect(() => {
     closeRef.current?.focus();
@@ -51,28 +79,17 @@ export function ReceiptDialog({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const change = receipt?.changeGiven ?? 0;
-  const balanceDue = receipt?.balanceDue ?? 0;
+  // Most counters want paper without being asked. Guarded by a ref so a re-render
+  // never sends the same receipt to the printer twice.
+  const printKey = receipt?.id ?? offline?.queuedAt ?? null;
+  useEffect(() => {
+    if (!autoPrint || !printKey || printedFor.current === printKey) return;
+    printedFor.current = printKey;
+    const id = setTimeout(() => window.print(), 150);
+    return () => clearTimeout(id);
+  }, [autoPrint, printKey]);
 
-  // One shape for the printed body, whether it came back from the server or is
-  // still sitting in the offline queue.
-  const printLines: PrintLine[] = receipt
-    ? receipt.lines.map((l) => ({
-        name: l.name,
-        unit: l.unit,
-        quantity: l.quantity,
-        lineTotal: l.lineTotal,
-        unitPrice: l.unitPrice,
-        discountAmount: l.discountAmount,
-      }))
-    : offline!.lines.map((l) => ({
-        name: l.name,
-        unit: l.unit,
-        quantity: l.quantity,
-        lineTotal: l.lineTotal,
-        unitPrice: null,
-        discountAmount: 0,
-      }));
+  const change = receipt?.changeGiven ?? 0;
 
   return (
     <div
@@ -114,128 +131,37 @@ export function ReceiptDialog({
           )}
         </div>
 
-        {/* The printable artefact. */}
-        <div className="receipt scroll-slim min-h-0 flex-1 overflow-y-auto px-6 py-5 font-mono text-[0.75rem] leading-relaxed">
-          <div className="text-center">
-            <p className="text-sm font-bold">{receipt?.business.name ?? shopName}</p>
-            {receipt && (
-              <>
-                <p className="text-muted">{receipt.branch.name}</p>
-                {receipt.branch.address && <p className="text-muted">{receipt.branch.address}</p>}
-                {receipt.branch.phone && <p className="text-muted">{receipt.branch.phone}</p>}
-                {receipt.business.taxNumber && (
-                  <p className="text-muted">TIN {receipt.business.taxNumber}</p>
-                )}
-              </>
-            )}
-          </div>
-
-          <Divider />
-
-          {receipt ? (
-            <div className="flex justify-between text-muted">
-              <span>{receipt.number}</span>
-              <span>{formatDateTime(receipt.soldAt)}</span>
-            </div>
-          ) : (
-            <div className="flex justify-between text-muted">
-              <span>Queued</span>
-              <span>{formatDateTime(offline!.queuedAt)}</span>
-            </div>
-          )}
-          {receipt?.cashier && <div className="text-muted">Served by {receipt.cashier}</div>}
-          {receipt?.customer && <div className="text-muted">Customer: {receipt.customer}</div>}
-
-          <Divider />
-
-          <ul>
-            {printLines.map((line, index) => (
-              <li key={index} className="mb-1.5">
-                <div className="flex justify-between gap-3">
-                  <span className="min-w-0 flex-1 truncate">{line.name}</span>
-                  <span className="tnum shrink-0">
-                    {formatMoney(line.lineTotal, currencyCode)}
-                  </span>
-                </div>
-                <div className="tnum text-muted">
-                  {formatQty(line.quantity)} {line.unit}
-                  {line.unitPrice !== null && ` × ${formatMoney(line.unitPrice, currencyCode)}`}
-                  {line.discountAmount > 0 && (
-                    <span> · less {formatMoney(line.discountAmount, currencyCode)}</span>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-
-          <Divider />
-
-          {receipt ? (
-            <dl className="space-y-0.5">
-              <Line label="Subtotal" value={formatMoney(receipt.subtotal, currencyCode)} />
-              {receipt.discountTotal > 0 && (
-                <Line label="Discount" value={`− ${formatMoney(receipt.discountTotal, currencyCode)}`} />
-              )}
-              {receipt.taxTotal > 0 && (
-                <Line label="Tax" value={formatMoney(receipt.taxTotal, currencyCode)} />
-              )}
-              <Line label="TOTAL" value={formatMoney(receipt.total, currencyCode)} strong />
-              <div className="pt-1.5" />
-              {receipt.payments.map((payment, index) => (
-                <Line
-                  key={index}
-                  label={PAYMENT_LABEL[payment.method]}
-                  value={formatMoney(payment.amount, currencyCode)}
-                />
-              ))}
-              {receipt.changeGiven > 0 && (
-                <Line label="Change" value={formatMoney(receipt.changeGiven, currencyCode)} />
-              )}
-              {balanceDue > 0 && (
-                <Line label="On account" value={formatMoney(balanceDue, currencyCode)} strong />
-              )}
-            </dl>
-          ) : (
-            <dl className="space-y-0.5">
-              <Line label="TOTAL" value={formatMoney(offline!.total, currencyCode)} strong />
-              {offline!.tenders.map((tender) => (
-                <Line
-                  key={tender.key}
-                  label={PAYMENT_LABEL[tender.method]}
-                  value={formatMoney(tender.amount, currencyCode)}
-                />
-              ))}
-            </dl>
-          )}
-
-          <Divider />
-          <p className="text-center text-muted">Thank you — please come again</p>
+        <div className="scroll-slim min-h-0 flex-1 overflow-y-auto px-6 py-5">
+          <ThermalReceipt view={view} />
         </div>
 
-        <div className="flex shrink-0 gap-2 border-t border-line p-4 print:hidden">
-          <button type="button" onClick={() => window.print()} className="btn btn-secondary px-4">
-            <Printer size={16} />
-            Print
-          </button>
-          <button ref={closeRef} type="button" onClick={onClose} className="btn btn-primary flex-1 py-3">
-            New sale
-            <kbd className="rounded bg-white/20 px-1.5 py-0.5 text-[0.625rem] font-semibold">↵</kbd>
-          </button>
+        <div className="shrink-0 border-t border-line p-4 print:hidden">
+          <label className="mb-3 flex cursor-pointer items-center gap-2 text-[0.75rem] text-muted">
+            <input
+              type="checkbox"
+              checked={autoPrint}
+              onChange={(event) => onToggleAutoPrint(event.target.checked)}
+              className="size-3.5 accent-[var(--brand)]"
+            />
+            Print automatically after every sale
+          </label>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => window.print()} className="btn btn-secondary px-4">
+              <Printer size={16} />
+              Print
+            </button>
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={onClose}
+              className="btn btn-primary flex-1 py-3"
+            >
+              New sale
+              <kbd className="rounded bg-white/20 px-1.5 py-0.5 text-[0.625rem] font-semibold">↵</kbd>
+            </button>
+          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Divider() {
-  return <div aria-hidden className="my-2.5 border-t border-dashed border-line-strong" />;
-}
-
-function Line({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className={`flex justify-between ${strong ? "text-[0.8125rem] font-bold" : ""}`}>
-      <dt>{label}</dt>
-      <dd className="tnum">{value}</dd>
     </div>
   );
 }

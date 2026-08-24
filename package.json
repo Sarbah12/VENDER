@@ -10,14 +10,16 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:studio": "drizzle-kit studio",
-    "db:seed": "NODE_OPTIONS=--conditions=react-server tsx scripts/seed.ts",
-    "db:reset": "rm -rf .data && npm run db:seed",
-    "smoke": "NODE_OPTIONS=--conditions=react-server tsx scripts/smoke.ts",
-    "test": "tsx --test src/domain/*.test.ts"
+    "db:reset": "rm -rf .data",
+    "smoke": "PGLITE_DIR=.data/smoke NODE_OPTIONS=--conditions=react-server tsx scripts/smoke.ts",
+    "test": "tsx --test src/domain/*.test.ts",
+    "db:migrate": "NODE_OPTIONS=--conditions=react-server tsx scripts/migrate.ts",
+    "db:seed:demo": "NODE_OPTIONS=--conditions=react-server tsx scripts/seed.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.7",
     "drizzle-orm": "^0.45.2",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.34.0",
     "next": "16.3.2",
     "postgres": "^3.4.9",

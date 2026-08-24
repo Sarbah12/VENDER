@@ -9,6 +9,7 @@ import { getShopContext } from "@/server/context";
 import { SignInForm } from "./SignInForm";
 
 export const metadata = { title: "Sign in" };
+export const dynamic = "force-dynamic";
 
 export default async function SignInPage() {
   const context = await getShopContext();

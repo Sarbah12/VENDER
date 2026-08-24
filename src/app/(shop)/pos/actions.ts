@@ -3,9 +3,60 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
+import { findByCode, searchCatalogue } from "@/server/catalogue";
 import { getShopContext, isSignedIn } from "@/server/context";
 import { getReceipt, type Receipt } from "@/server/receipts";
 import { recordSale, SaleError } from "@/server/sales";
+import type { PosProduct } from "./types";
+
+/**
+ * Catalogue lookups for a till that is too big to hold its own catalogue.
+ * Returns the same shape the page sends down, so the terminal cannot tell where
+ * a product came from.
+ */
+export async function lookupProducts(input: {
+  query: string;
+  exactCodeOnly?: boolean;
+}): Promise<PosProduct[]> {
+  const context = await getShopContext();
+  if (!context || !isSignedIn(context)) return [];
+
+  const warehouseId = context.register?.warehouseId ?? context.warehouse.id;
+  const query = input.query.trim().slice(0, 80);
+  if (!query) return [];
+
+  const toPos = (row: {
+    id: string;
+    name: string;
+    sku: string;
+    barcode: string | null;
+    unit: string;
+    sellPrice: number;
+    taxRateBp: number | null;
+    trackStock: boolean;
+    allowNegativeStock: boolean;
+    stock: number;
+    categoryId: string | null;
+    categoryName: string;
+    categoryColour: string | null;
+  }): PosProduct => ({
+    ...row,
+    taxRateBp: row.taxRateBp ?? context.business.taxRateBp,
+  });
+
+  if (input.exactCodeOnly) {
+    const found = await findByCode(context.business.id, warehouseId, query);
+    return found ? [toPos(found)] : [];
+  }
+
+  const { rows } = await searchCatalogue({
+    businessId: context.business.id,
+    warehouseId,
+    query,
+    limit: 60,
+  });
+  return rows.map(toPos);
+}
 
 const CheckoutSchema = z.object({
   /** Minted by the till before the first attempt; makes retries idempotent. */

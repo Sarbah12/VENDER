@@ -40,6 +40,8 @@ export const NAV: NavItem[] = [
     built: true,
     children: [
       { label: "All products", href: "/products", built: true },
+      { label: "Add product", href: "/products/new", built: true },
+      { label: "Import from Excel", href: "/products/import", built: true },
       { label: "Categories", href: "/products/categories", built: true },
       { label: "Stock levels", href: "/inventory", built: true },
     ],

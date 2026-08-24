@@ -19,10 +19,25 @@ import { PaymentDialog } from "./PaymentDialog";
 import { ProductPanel } from "./ProductPanel";
 import { ReceiptDialog, type OfflineReceipt } from "./ReceiptDialog";
 import { Toast, type ToastMessage } from "./Toast";
-import type { CartLine, PosCustomer, PosProduct, Tender } from "./types";
+import type { CartLine, PosCategory, PosCustomer, PosProduct, Tender } from "./types";
+
+/** Whether this till sends every receipt straight to the printer. Per browser. */
+const AUTO_PRINT_KEY = "vender.auto-print.v1";
+
+function readAutoPrintPreference(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(AUTO_PRINT_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
 
 export function PosTerminal({
   products,
+  categories,
+  catalogueSize,
+  holdsEverything,
   customers,
   currencyCode,
   pricesIncludeTax,
@@ -31,6 +46,9 @@ export function PosTerminal({
   cashierName,
 }: {
   products: PosProduct[];
+  categories: PosCategory[];
+  catalogueSize: number;
+  holdsEverything: boolean;
   customers: PosCustomer[];
   currencyCode: string;
   pricesIncludeTax: boolean;
@@ -45,6 +63,11 @@ export function PosTerminal({
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [offlineReceipt, setOfflineReceipt] = useState<OfflineReceipt | null>(null);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+
+  // Read lazily rather than in an effect. It renders nothing until a sale
+  // completes — long after hydration — so a server/client difference here can
+  // never reach the DOM.
+  const [autoPrint, setAutoPrint] = useState(readAutoPrintPreference);
 
   // The queue lives in localStorage, so it is read as an external store rather
   // than mirrored into state — that keeps the badge honest when another tab
@@ -280,6 +303,9 @@ export function PosTerminal({
       <ProductPanel
         ref={searchRef}
         products={products}
+        categories={categories}
+        catalogueSize={catalogueSize}
+        holdsEverything={holdsEverything}
         currencyCode={currencyCode}
         onPick={addProduct}
         onNotFound={(code) => setToast({ kind: "warn", text: `Nothing matches “${code}”.` })}
@@ -321,6 +347,15 @@ export function PosTerminal({
           offline={offlineReceipt}
           currencyCode={currencyCode}
           shopName={shopName}
+          autoPrint={autoPrint}
+          onToggleAutoPrint={(value) => {
+            setAutoPrint(value);
+            try {
+              window.localStorage.setItem(AUTO_PRINT_KEY, String(value));
+            } catch {
+              // Private mode — the preference just will not stick.
+            }
+          }}
           onClose={closeReceipt}
         />
       )}

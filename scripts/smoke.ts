@@ -6,6 +6,9 @@
  * receipt sequence does not repeat, a replayed sale is not charged twice, and a
  * sale that would oversell the shelf is refused with nothing left behind.
  */
+import fs from "node:fs";
+import path from "node:path";
+
 import { and, eq, sql } from "drizzle-orm";
 
 import { getDb } from "../src/db/client";
@@ -23,6 +26,8 @@ import {
   warehouses,
 } from "../src/db/schema";
 import { seedDemoBusiness } from "../src/db/seed";
+import { buildPreview, buildTemplateWorkbook, commitImport } from "../src/server/import";
+import { updateProduct } from "../src/server/products";
 import { recordSale, SaleError } from "../src/server/sales";
 
 let failures = 0;
@@ -37,6 +42,12 @@ function check(label: string, condition: boolean, detail?: string) {
 }
 
 async function main() {
+  // Always start from an empty database, so the assertions below describe the
+  // code rather than whatever happened to be left over from the last run. Safe
+  // to delete because PGLITE_DIR points somewhere disposable.
+  const dir = process.env.PGLITE_DIR;
+  if (dir) fs.rmSync(path.resolve(dir), { recursive: true, force: true });
+
   await seedDemoBusiness();
   const db = await getDb();
 
@@ -208,8 +219,218 @@ async function main() {
     `${totals.debit} vs ${totals.credit}`,
   );
 
+  /* ── 8. Importing a catalogue from a spreadsheet ───────────────────── */
+  console.log("\nSpreadsheet import");
+
+  const csv = [
+    "Item Code,Product Name,Bar-Code,Category,Unit,Buying Price,Selling Price,Qty,Reorder Level,Track Stock,Supplier Notes",
+    'IMP-001,"Milk Powder, 400g",6009900000011,Imported Goods,tin,"GH₵ 42.00","GH₵ 58.00",30,6,Yes,ignored column',
+    "IMP-002,Cornflakes 500g,6009900000028,Imported Goods,pack,\"1,250\",\"1,600\",12,3,Yes,",
+    "IMP-003,Gift Wrapping,,Services,pc,0,5.00,0,0,No,",
+    "IMP-004,Broken Row,,Imported Goods,pc,10,not-a-price,5,0,Yes,",
+    "IMP-001,Duplicate Code,,Imported Goods,pc,1,2,1,0,Yes,",
+  ].join("\n");
+
+  const preview = await buildPreview(
+    business.id,
+    { name: "supplier-list.csv", buffer: new TextEncoder().encode(csv).buffer as ArrayBuffer },
+    { taxRateBp: business.taxRateBp },
+  );
+
+  check("headers were matched despite different names", preview.missingRequired.length === 0);
+  check("unrecognised columns are ignored, not rejected", preview.unmatchedHeaders.includes("Supplier Notes"));
+  check("three good rows are ready to create", preview.summary.create === 3, `got ${preview.summary.create}`);
+  check("two bad rows are flagged", preview.summary.error === 2, `got ${preview.summary.error}`);
+  check(
+    "the promised opening-stock value excludes skipped rows",
+    // Only IMP-001 (42.00 × 30) and IMP-002 (1,250.00 × 12) are written.
+    preview.summary.openingStockValue === 4200 * 30 + 125_000 * 12,
+    `got ${preview.summary.openingStockValue}`,
+  );
+
+  const cornflakes = preview.rows.find((r) => r.sku === "IMP-002");
+  check(
+    "a thousands separator is not read as decimals",
+    cornflakes?.sellPrice === 160_000 && cornflakes?.costPrice === 125_000,
+    `got ${cornflakes?.costPrice} / ${cornflakes?.sellPrice}`,
+  );
+  const milk = preview.rows.find((r) => r.sku === "IMP-001" && r.action === "create");
+  check("currency symbols are stripped", milk?.sellPrice === 5800, `got ${milk?.sellPrice}`);
+  check(
+    "a repeated code in the same file is refused",
+    preview.rows.some((r) => r.errors.some((e) => e.includes("also appears on row"))),
+  );
+  check(
+    "a service row keeps its opening stock at zero",
+    preview.rows.find((r) => r.sku === "IMP-003")?.openingStock === 0,
+  );
+
+  const inventoryBefore = await accountBalance("inventory");
+  const result = await commitImport({
+    businessId: business.id,
+    branchId: branch.id,
+    warehouseId: warehouse.id,
+    employeeId: cashier.id,
+    rows: preview.rows,
+  });
+
+  check("only the good rows were written", result.created === 3 && result.updated === 0);
+  check("the new category was created", result.categoriesCreated === 1);
+
+  const [imported] = await db
+    .select()
+    .from(products)
+    .where(and(eq(products.businessId, business.id), eq(products.sku, "IMP-001")))
+    .limit(1);
+  check("the product exists with its barcode", imported?.barcode === "6009900000011");
+  check("opening stock was counted in", (await stockOf(imported.id)) === 30);
+
+  const inventoryAfter = await accountBalance("inventory");
+  check(
+    "opening stock was posted to Inventory at cost",
+    inventoryAfter - inventoryBefore === 42_00 * 30 + 125_000 * 12,
+    `moved ${inventoryAfter - inventoryBefore}`,
+  );
+
+  /* ── 9. Re-importing the same file ─────────────────────────────────── */
+  console.log("\nRe-import");
+
+  const reimport = await buildPreview(
+    business.id,
+    { name: "supplier-list.csv", buffer: new TextEncoder().encode(csv).buffer as ArrayBuffer },
+    { taxRateBp: business.taxRateBp },
+  );
+
+  check(
+    "known codes are updates, not duplicates",
+    reimport.summary.update === 3 && reimport.summary.create === 0,
+  );
+  check(
+    "stock is left alone on re-import",
+    reimport.rows.filter((row) => row.action !== "error").every((row) => row.openingStock === 0),
+  );
+  check(
+    "and the user is told why",
+    reimport.rows.some((row) => row.warnings.some((w) => w.includes("Stock left unchanged"))),
+  );
+
+  await commitImport({
+    businessId: business.id,
+    branchId: branch.id,
+    warehouseId: warehouse.id,
+    employeeId: cashier.id,
+    rows: reimport.rows,
+  });
+  check("re-importing did not double the stock", (await stockOf(imported.id)) === 30);
+
+  const [productCount] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(products)
+    .where(and(eq(products.businessId, business.id), eq(products.sku, "IMP-001")));
+  check("and did not create a second product", Number(productCount.n) === 1);
+
+  /* ── 10. The template we hand out can be read back ─────────────────── */
+  console.log("\nTemplate round-trip");
+
+  const template = await buildTemplateWorkbook("GHS");
+  const templatePreview = await buildPreview(
+    business.id,
+    {
+      name: "template.xlsx",
+      buffer: template.buffer.slice(
+        template.byteOffset,
+        template.byteOffset + template.byteLength,
+      ) as ArrayBuffer,
+    },
+    { taxRateBp: business.taxRateBp },
+  );
+  check("the generated template parses as a valid import", templatePreview.missingRequired.length === 0);
+  check(
+    "its example rows are usable",
+    templatePreview.summary.error === 0 && templatePreview.rows.length >= 2,
+    `${templatePreview.rows.length} rows, ${templatePreview.summary.error} errors`,
+  );
+
+  /* ── 11. Re-pricing keeps the Inventory account honest ─────────────── */
+  console.log("\nCost revaluation");
+
+  const heldBefore = await stockOf(imported.id);
+  const inventoryBeforeRepricing = await accountBalance("inventory");
+
+  await updateProduct({
+    businessId: business.id,
+    branchId: branch.id,
+    productId: imported.id,
+    input: {
+      sku: imported.sku,
+      name: imported.name,
+      barcode: imported.barcode,
+      categoryId: imported.categoryId,
+      unit: imported.unit,
+      // Supplier raised the price by GH₵ 8.00 a tin.
+      costPrice: imported.costPrice + 800,
+      sellPrice: imported.sellPrice,
+      taxRateBp: imported.taxRateBp,
+      trackStock: true,
+      allowNegativeStock: false,
+      reorderPoint: Number(imported.reorderPoint),
+      isActive: true,
+    },
+  });
+
+  const inventoryAfterRepricing = await accountBalance("inventory");
+  check(
+    "a cost change revalues the stock already on hand",
+    inventoryAfterRepricing - inventoryBeforeRepricing === 800 * heldBefore,
+    `moved ${inventoryAfterRepricing - inventoryBeforeRepricing}, expected ${800 * heldBefore}`,
+  );
+
+  // The claim the inventory page makes — "value at cost matches the Inventory
+  // account" — is only true if this holds.
+  const valuation = await db
+    .select({ quantity: stockLevels.quantity, costPrice: products.costPrice })
+    .from(stockLevels)
+    .innerJoin(products, eq(products.id, stockLevels.productId))
+    .where(eq(stockLevels.businessId, business.id));
+
+  const stockAtCost = valuation.reduce(
+    (total, row) => total + Math.round(row.costPrice * Number(row.quantity)),
+    0,
+  );
+  check(
+    "the stock report and the Inventory account agree",
+    stockAtCost === inventoryAfterRepricing,
+    `report ${stockAtCost} vs ledger ${inventoryAfterRepricing}`,
+  );
+
+  /* ── 12. Books still balance after all of that ─────────────────────── */
+  console.log("\nTrial balance, after imports");
+  const [finalTotals] = await db
+    .select({
+      debit: sql<string>`coalesce(sum(${journalLines.debit}), 0)`,
+      credit: sql<string>`coalesce(sum(${journalLines.credit}), 0)`,
+    })
+    .from(journalLines);
+  check(
+    "every entry still balances",
+    Number(finalTotals.debit) === Number(finalTotals.credit),
+    `${finalTotals.debit} vs ${finalTotals.credit}`,
+  );
+
   console.log(failures === 0 ? "\nAll checks passed.\n" : `\n${failures} check(s) failed.\n`);
   process.exit(failures === 0 ? 0 : 1);
+
+  async function accountBalance(systemKey: string): Promise<number> {
+    const [row] = await db
+      .select({
+        debit: sql<string>`coalesce(sum(${journalLines.debit}), 0)`,
+        credit: sql<string>`coalesce(sum(${journalLines.credit}), 0)`,
+      })
+      .from(journalLines)
+      .innerJoin(accounts, eq(accounts.id, journalLines.accountId))
+      .where(and(eq(accounts.businessId, business.id), eq(accounts.systemKey, systemKey)));
+    return Number(row.debit) - Number(row.credit);
+  }
 
   async function stockOf(productId: string): Promise<number> {
     const [row] = await db

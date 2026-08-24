@@ -31,12 +31,16 @@ export function SalesBarChart({
   const plotWidth = width - padding.left - padding.right;
   const plotHeight = height - padding.top - padding.bottom;
 
-  const peak = Math.max(...data.map((d) => d.revenue), 1);
-  const ceiling = niceCeiling(peak);
+  const peak = Math.max(...data.map((d) => d.revenue), 0);
+  // A shop that has not sold anything yet still needs a readable axis, so the
+  // scale never drops below a sensible floor.
+  const ceiling = niceCeiling(Math.max(peak, 10_000));
   const slot = plotWidth / Math.max(data.length, 1);
   const barWidth = Math.min(slot * 0.62, 34);
 
-  const ticks = [0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(ceiling * f));
+  // Deduplicated: on a small scale two fractions can round to the same figure,
+  // which would draw gridlines on top of each other.
+  const ticks = [...new Set([0, 0.25, 0.5, 0.75, 1].map((f) => Math.round(ceiling * f)))];
 
   return (
     <figure className="w-full">
@@ -47,10 +51,10 @@ export function SalesBarChart({
         aria-label={`Daily takings for the last ${data.length} days`}
         preserveAspectRatio="none"
       >
-        {ticks.map((tick) => {
+        {ticks.map((tick, index) => {
           const y = padding.top + plotHeight - (tick / ceiling) * plotHeight;
           return (
-            <g key={tick}>
+            <g key={`tick-${index}`}>
               <line
                 x1={padding.left}
                 x2={width - padding.right}
