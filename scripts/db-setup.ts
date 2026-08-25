@@ -16,7 +16,14 @@ import readline from "node:readline";
 
 import { checkDatabaseUrl } from "../src/lib/env";
 
-const ENV_PATH = path.join(process.cwd(), ".env.local");
+/**
+ * VENDER_ENV_FILE lets a test point this at a scratch file. Without it, testing
+ * the script means writing over the real .env.local — which is exactly how you
+ * destroy the credentials someone was in the middle of entering.
+ */
+const ENV_PATH = process.env.VENDER_ENV_FILE
+  ? path.resolve(process.env.VENDER_ENV_FILE)
+  : path.join(process.cwd(), ".env.local");
 const TEMPLATE_PATH = path.join(process.cwd(), ".env.local.template");
 
 /**
