@@ -154,6 +154,9 @@ export const products = pgTable(
     // real barcode must resolve to exactly one product or scanning is ambiguous.
     uniqueIndex("products_business_barcode_uq").on(t.businessId, t.barcode),
     index("products_business_active_idx").on(t.businessId, t.isActive),
+    // The catalogue is always listed in name order. Without this, every page of
+    // a large catalogue sorts the whole filtered set before returning 50 rows.
+    index("products_business_name_idx").on(t.businessId, t.name),
   ],
 );
 
@@ -173,7 +176,11 @@ export const stockLevels = pgTable(
     quantity: qty("quantity").notNull().default(0),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [uniqueIndex("stock_levels_warehouse_product_uq").on(t.warehouseId, t.productId)],
+  (t) => [
+    uniqueIndex("stock_levels_warehouse_product_uq").on(t.warehouseId, t.productId),
+    // Revaluing a product sums its stock across every warehouse in the business.
+    index("stock_levels_business_product_idx").on(t.businessId, t.productId),
+  ],
 );
 
 export const stockMovementReason = pgEnum("stock_movement_reason", [
@@ -220,6 +227,9 @@ export const stockMovements = pgTable(
   (t) => [
     index("stock_movements_product_idx").on(t.productId, t.createdAt),
     index("stock_movements_ref_idx").on(t.refType, t.refId),
+    // The movements page reads the newest few hundred for the whole business.
+    // This table grows with every line of every sale, so it must not be scanned.
+    index("stock_movements_business_time_idx").on(t.businessId, t.createdAt),
   ],
 );
 
@@ -364,6 +374,10 @@ export const sales = pgTable(
     uniqueIndex("sales_business_client_ref_uq").on(t.businessId, t.clientRef),
     index("sales_business_sold_at_idx").on(t.businessId, t.soldAt),
     index("sales_branch_sold_at_idx").on(t.branchId, t.soldAt),
+    // Both of these are joined from list pages — the customer's history and the
+    // cashier's takings — and neither is covered by the indexes above.
+    index("sales_customer_idx").on(t.customerId),
+    index("sales_employee_idx").on(t.employeeId),
   ],
 );
 
@@ -396,7 +410,12 @@ export const saleLines = pgTable(
     costSnapshot: money("cost_snapshot").notNull().default(0),
     quantityRefunded: qty("quantity_refunded").notNull().default(0),
   },
-  (t) => [index("sale_lines_sale_idx").on(t.saleId)],
+  (t) => [
+    index("sale_lines_sale_idx").on(t.saleId),
+    // "How much of this product have we sold" — the basis of every product
+    // performance report, over the fastest-growing table in the schema.
+    index("sale_lines_product_idx").on(t.productId),
+  ],
 );
 
 export const paymentMethod = pgEnum("payment_method", [

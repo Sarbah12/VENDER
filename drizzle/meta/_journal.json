@@ -8,6 +8,20 @@
       "when": 1787573845065,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787636017598,
+      "tag": "0001_secure_rls",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787636212661,
+      "tag": "0002_performance_indexes",
+      "breakpoints": true
     }
   ]
 }

@@ -74,6 +74,36 @@ async function main() {
     if (counts.businesses === 0) {
       console.log("Open the app and visit /setup to create your business.");
     }
+
+    // On Supabase the public schema is served over HTTP with a key that ships in
+    // client code, so a table without RLS is a table anyone can read. Reported
+    // rather than assumed, because it is silent when it goes wrong.
+    const unprotected = await sql<{ relname: string }[]>`
+      select c.relname
+      from pg_class c
+      join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity
+      order by c.relname
+    `;
+
+    const [exposed] = await sql<{ role_count: number }[]>`
+      select count(*)::int as role_count
+      from information_schema.role_table_grants
+      where table_schema = 'public' and grantee in ('anon', 'authenticated')
+    `;
+
+    if (unprotected.length === 0 && exposed.role_count === 0) {
+      console.log("Row-level security: on for every table, API roles have no grants ✓");
+    } else {
+      console.warn("\n⚠  This database is reachable over Supabase's HTTP API.");
+      if (unprotected.length > 0) {
+        console.warn(`   Tables without row-level security: ${unprotected.map((t) => t.relname).join(", ")}`);
+      }
+      if (exposed.role_count > 0) {
+        console.warn(`   anon/authenticated still hold ${exposed.role_count} table grant(s).`);
+      }
+      console.warn("   Fix with:  npm run db:migrate");
+    }
   } finally {
     await sql.end({ timeout: 5 });
   }

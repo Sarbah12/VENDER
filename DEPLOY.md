@@ -67,6 +67,37 @@ npm run dev                 # visit /setup to create your business
 `db:ping` reports what it found and names the likely cause if it fails. It never
 prints the connection string.
 
+### The data API is closed, deliberately
+
+Supabase serves the `public` schema over HTTP through PostgREST, and grants the
+`anon` and `authenticated` roles access to tables created there by default. The
+anon key is meant to be public — it ships inside client code. Left alone, that
+would make every row in this database readable and writable by anyone who knows
+the project URL: `employees.pin_hash`, every sale, every customer.
+
+Migration `0001_secure_rls` closes it, and is applied by `npm run db:migrate`
+along with everything else:
+
+- **Row-level security is enabled on all 22 tables, with no policies.** PostgREST
+  connects as `anon`, which then matches no rows and can write nothing.
+- **Grants are revoked** from `anon` and `authenticated`, including default
+  privileges for tables created later.
+
+The app is unaffected because it connects straight to Postgres as the role that
+*owns* these tables, and an owner bypasses RLS unless `FORCE ROW LEVEL SECURITY`
+is set. The full smoke suite passes against a database with RLS on, which is what
+proves it.
+
+`npm run db:ping` reports the state of both every time you run it, so a table
+added later without protection shows up rather than sitting there quietly. If you
+ever add a table by hand, re-run `npm run db:migrate` to bring it under the same
+rule.
+
+> This is worth understanding rather than just accepting: if you later decide to
+> use Supabase's client libraries for something, you will need to write explicit
+> RLS policies for whatever you expose. The default here is "closed", and that is
+> the right default for a system of record.
+
 ### Free plan: two things to fix before a real shop uses this
 
 Your project is on the free plan with `nano` compute, and the dashboard shows
