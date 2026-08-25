@@ -15,7 +15,8 @@
     "test": "tsx --test src/domain/*.test.ts src/lib/*.test.ts",
     "db:migrate": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
     "db:seed:demo": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed.ts",
-    "db:ping": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-ping.ts"
+    "db:ping": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-ping.ts",
+    "db:setup": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-setup.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.7",
