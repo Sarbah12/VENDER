@@ -198,7 +198,21 @@ async function main() {
   console.log("\nWritten to .env.local (owner-only, gitignored):");
   console.log("  DATABASE_URL         → transaction pooler, for the app");
   console.log("  DIRECT_DATABASE_URL  → session pooler, for migrations");
-  console.log("\nNext:  npm run db:ping\n");
+
+  // Test it here rather than leaving you to discover a typo two commands later.
+  const { probe } = await import("./probe");
+  const result = await probe(appUrl);
+
+  if (result === "failed") {
+    console.error("\nThe details were saved, but the connection did not work.");
+    console.error("Fix whatever is named above, then run:  npm run db:setup\n");
+    process.exit(1);
+  }
+
+  if (result === "needs-migration") {
+    console.log("\nNext:  npm run db:migrate\n");
+  }
+
   process.exit(0);
 }
 

@@ -98,6 +98,20 @@ rule.
 > RLS policies for whatever you expose. The default here is "closed", and that is
 > the right default for a system of record.
 
+### Two switches worth flipping in Database Settings
+
+Both are off by default and cost nothing:
+
+- **Enforce SSL on incoming connections.** The app already connects with TLS, but
+  this rejects anything that does not, so a misconfigured client cannot quietly
+  send credentials in the clear.
+- **Connection logging** (*Log connections* / *Log disconnections*). Cheap, and
+  the first thing you will want if you ever need to work out who connected when.
+
+**Network restrictions** are also there, and tempting — but leave them alone if
+you deploy to Vercel or Fly, whose outbound addresses are dynamic. They are only
+practical from a fixed IP.
+
 ### Free plan: two things to fix before a real shop uses this
 
 Your project is on the free plan with `nano` compute, and the dashboard shows
