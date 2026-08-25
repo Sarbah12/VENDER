@@ -48,7 +48,8 @@ test("a password containing an unescaped @ is explained", () => {
 });
 
 test("something that is not a Postgres URL at all", () => {
-  assert.match(message("https://jusmuwfvvxlvkwlkntbc.supabase.co")!, /should start with postgresql/);
+  // Pasting the project URL instead of the connection string is a common slip.
+  assert.match(message("https://abcdefghijklmnop.supabase.co")!, /should start with postgresql/);
 });
 
 test("a URL with no password is caught", () => {
