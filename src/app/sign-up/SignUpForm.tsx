@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 
+import { PasswordField } from "@/components/PasswordField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { signUp, type SignUpState } from "./actions";
 
@@ -19,20 +20,14 @@ export function SignUpForm() {
         <input name="email" type="email" autoComplete="email" required maxLength={200} className="input" />
       </Field>
 
-      <Field
+      <PasswordField
+        name="password"
         label="Password"
+        autoComplete="new-password"
+        minLength={12}
         error={error("password")}
         hint="At least 12 characters. Length beats symbols."
-      >
-        <input
-          name="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={12}
-          className="input"
-        />
-      </Field>
+      />
 
       {state.error && (
         <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm font-medium text-danger">

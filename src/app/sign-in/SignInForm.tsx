@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 
+import { PasswordField } from "@/components/PasswordField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { signIn, type SignInState } from "./actions";
 
@@ -23,16 +24,7 @@ export function SignInForm() {
         />
       </label>
 
-      <label className="block">
-        <span className="label">Password</span>
-        <input
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          className="input"
-        />
-      </label>
+      <PasswordField name="password" label="Password" autoComplete="current-password" />
 
       {state.error && (
         <p role="alert" className="rounded-lg bg-danger-soft px-3 py-2.5 text-sm font-medium text-danger">
