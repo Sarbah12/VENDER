@@ -17,7 +17,8 @@
     "db:seed:demo": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed.ts",
     "db:ping": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-ping.ts",
     "db:setup": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-setup.ts",
-    "tenancy": "PGLITE_DIR=.data/tenancy NODE_OPTIONS=--conditions=react-server tsx scripts/tenancy.ts"
+    "tenancy": "PGLITE_DIR=.data/tenancy NODE_OPTIONS=--conditions=react-server tsx scripts/tenancy.ts",
+    "db:verify": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/verify-live.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.7",
