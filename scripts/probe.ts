@@ -123,11 +123,22 @@ export async function probe(url: string | undefined): Promise<ProbeResult> {
           "dialog, change Connection Method from 'Direct connection' to 'Transaction pooler'.",
       );
     } else if (message.includes("ENOTFOUND")) {
-      console.error(
-        "That hostname does not resolve. Check the region part of the host, and that you\n" +
-          "copied the whole string. If you are on the 'Direct connection' tab, switch to\n" +
-          "'Transaction pooler' — the direct host is IPv6-only without the IPv4 add-on.",
-      );
+      // Naming the specific case is the difference between a fix and an evening
+      // lost: the direct host publishes only an AAAA record, and a machine with
+      // no global IPv6 address will not even be offered it by getaddrinfo.
+      if (/db\.[a-z0-9]+\.supabase\.co/.test(message)) {
+        console.error(
+          "That is the 'Direct connection' host, which publishes only an IPv6 address.\n" +
+            "This machine has no global IPv6 address, so it cannot resolve it at all.\n\n" +
+            "Use the pooler instead — in the Connect dialog, change Connection Method from\n" +
+            "'Direct connection' to 'Transaction pooler', and copy that string.",
+        );
+      } else {
+        console.error(
+          "That hostname does not resolve. Check the region part of the host, and that you\n" +
+            "copied the whole string rather than editing one by hand.",
+        );
+      }
     } else if (message.includes("password authentication failed")) {
       console.error(
         "The password is wrong. Supabase never shows it again after project creation, so if\n" +

@@ -125,18 +125,51 @@ function upsert(contents: string, key: string, value: string): string {
   return pattern.test(contents) ? contents.replace(pattern, line) : `${contents.trimEnd()}\n${line}\n`;
 }
 
+/**
+ * A connection string that is complete apart from the password — the shape you
+ * get by copying it straight from the dashboard, which always leaves
+ * `[YOUR-PASSWORD]` in place because Supabase never shows the real one.
+ */
+function isReadyExceptPassword(url: string | undefined): url is string {
+  if (!url) return false;
+  if (!/\[YOUR-PASSWORD\]/i.test(url)) return false;
+  // Any other placeholder means the host is not filled in either.
+  return !/\[(?!YOUR-PASSWORD)[A-Z-]+\]/i.test(url);
+}
+
 async function main() {
   const prompter = await Prompter.create();
 
   console.log("\nConnecting this app to Supabase\n");
-  console.log("In the Supabase dashboard: Connect → Direct → Connection string,");
-  console.log("then copy the URL labelled 'Transaction pooler' (it ends in :6543/postgres).\n");
 
-  const pasted = await prompter.ask("Paste the Transaction pooler URL:\n> ");
-  if (!pasted) {
-    prompter.close();
-    console.error("\nNothing pasted. Run `npm run db:setup` again when you have it.");
-    process.exit(1);
+  const existing = process.env.DATABASE_URL;
+  let pasted: string;
+  const reusingExisting = isReadyExceptPassword(existing);
+
+  if (reusingExisting) {
+    // Everything but the password is already on file; do not make them find the
+    // string again just to paste back what is already there.
+    const host = (() => {
+      try {
+        return new URL(existing.replace(/\[YOUR-PASSWORD\]/i, "x")).host;
+      } catch {
+        return "the configured host";
+      }
+    })();
+
+    console.log(`Using the connection already in .env.local:  ${host}`);
+    console.log("Only the password is missing.\n");
+    pasted = existing;
+  } else {
+    console.log("In the Supabase dashboard: Connect → Direct → Connection string,");
+    console.log("then copy the URL labelled 'Transaction pooler' (it ends in :6543/postgres).\n");
+
+    pasted = await prompter.ask("Paste the Transaction pooler URL:\n> ");
+    if (!pasted) {
+      prompter.close();
+      console.error("\nNothing pasted. Run `npm run db:setup` again when you have it.");
+      process.exit(1);
+    }
   }
 
   if (pasted.includes("supabase.co") && !pasted.startsWith("postgres")) {
@@ -147,11 +180,50 @@ async function main() {
     process.exit(1);
   }
 
-  if (!pasted.includes(":6543")) {
+  // Only worth saying about a string just pasted by hand. A connection already
+  // on file was chosen deliberately — a direct connection is the right answer
+  // for local development on a network with IPv6.
+  if (!reusingExisting && !pasted.includes(":6543")) {
     console.warn(
-      "\nHeads up: that is not the transaction pooler (port 6543). Continuing, but the app\n" +
-        "wants the 6543 URL — check you copied the right one of the three.",
+      "\nHeads up: that is not the transaction pooler (port 6543). Continuing, but for\n" +
+        "production the app wants the 6543 URL — check you copied the right one of the three.",
     );
+  }
+
+  // Resolve the host before asking for anything secret. A hostname this machine
+  // cannot look up will never connect, and finding that out after typing a
+  // password is a waste of the one step only you can do.
+  const hostname = (() => {
+    try {
+      return new URL(pasted.replace(/\[YOUR-PASSWORD\]/i, "x")).hostname;
+    } catch {
+      return null;
+    }
+  })();
+
+  if (hostname) {
+    const dns = await import("node:dns");
+    const resolvable = await new Promise<boolean>((resolve) =>
+      dns.lookup(hostname, { all: true }, (error) => resolve(!error)),
+    );
+
+    if (!resolvable) {
+      prompter.close();
+      console.error(`\nThis machine cannot resolve ${hostname}.`);
+
+      if (/^db\.[a-z0-9]+\.supabase\.co$/.test(hostname)) {
+        console.error(
+          "\nThat is the 'Direct connection' host, which publishes only an IPv6 address, and\n" +
+            "this machine has no global IPv6 address.\n\n" +
+            "In the Connect dialog, change Connection Method from 'Direct connection' to\n" +
+            "'Transaction pooler', copy that string, and run `npm run db:setup` again.",
+        );
+      } else {
+        console.error("\nCheck the region in the hostname, then run `npm run db:setup` again.");
+      }
+      console.error("\nNothing was written, and you were not asked for a password.\n");
+      process.exit(1);
+    }
   }
 
   console.log(
