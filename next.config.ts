@@ -2,9 +2,15 @@ import path from "node:path";
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Produces .next/standalone: a self-contained server with only the modules it
-  // actually uses, which is what the Dockerfile ships. Ignored by Vercel.
-  output: "standalone",
+  /**
+   * Standalone output — a self-contained server carrying only the modules it
+   * actually uses — is what the Dockerfile ships to Railway, Fly or a VPS.
+   *
+   * Vercel must not get it. It builds its own serverless output and expects the
+   * default trace files; standalone replaces them, and the build dies on a
+   * missing next-server.js.nft.json well after "Compiled successfully".
+   */
+  output: process.env.VERCEL ? undefined : "standalone",
 
   /**
    * PGlite ships a WASM build of Postgres and reaches for node:fs directly. Left
