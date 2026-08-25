@@ -14,10 +14,17 @@ async function main() {
     process.exit(0);
   }
 
-  const [postgres, { poolSettings }] = await Promise.all([
+  const [postgres, { poolSettings }, { checkDatabaseUrl }] = await Promise.all([
     import("postgres").then((m) => m.default),
     import("../src/db/client"),
+    import("../src/lib/env"),
   ]);
+
+  const check = checkDatabaseUrl(url, "DATABASE_URL");
+  if (!check.ok) {
+    console.error(check.message);
+    process.exit(1);
+  }
 
   const { prepare, transactionPooled } = poolSettings(url);
   console.log(

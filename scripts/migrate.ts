@@ -20,12 +20,21 @@ async function main() {
     process.exit(0);
   }
 
-  const [{ drizzle }, { migrate }, postgres, { poolSettings }] = await Promise.all([
-    import("drizzle-orm/postgres-js"),
-    import("drizzle-orm/postgres-js/migrator"),
-    import("postgres").then((m) => m.default),
-    import("../src/db/client"),
-  ]);
+  const [{ drizzle }, { migrate }, postgres, { poolSettings }, { checkDatabaseUrl }] =
+    await Promise.all([
+      import("drizzle-orm/postgres-js"),
+      import("drizzle-orm/postgres-js/migrator"),
+      import("postgres").then((m) => m.default),
+      import("../src/db/client"),
+      import("../src/lib/env"),
+    ]);
+
+  const variable = process.env.DIRECT_DATABASE_URL ? "DIRECT_DATABASE_URL" : "DATABASE_URL";
+  const check = checkDatabaseUrl(url, variable);
+  if (!check.ok) {
+    console.error(check.message);
+    process.exit(1);
+  }
 
   const { prepare, transactionPooled } = poolSettings(url);
   if (transactionPooled) {

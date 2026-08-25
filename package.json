@@ -12,10 +12,10 @@
     "db:studio": "drizzle-kit studio",
     "db:reset": "rm -rf .data",
     "smoke": "PGLITE_DIR=.data/smoke NODE_OPTIONS=--conditions=react-server tsx scripts/smoke.ts",
-    "test": "tsx --test src/domain/*.test.ts",
-    "db:migrate": "NODE_OPTIONS=--conditions=react-server tsx scripts/migrate.ts",
-    "db:seed:demo": "NODE_OPTIONS=--conditions=react-server tsx scripts/seed.ts",
-    "db:ping": "NODE_OPTIONS=--conditions=react-server tsx scripts/db-ping.ts"
+    "test": "tsx --test src/domain/*.test.ts src/lib/*.test.ts",
+    "db:migrate": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/migrate.ts",
+    "db:seed:demo": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/seed.ts",
+    "db:ping": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-ping.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.7",

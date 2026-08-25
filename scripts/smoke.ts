@@ -42,6 +42,17 @@ function check(label: string, condition: boolean, detail?: string) {
 }
 
 async function main() {
+  // This script creates, sells and deletes. Running it against a real database
+  // would seed a demo shop into someone's books, so it refuses outright rather
+  // than trusting that DATABASE_URL was not left set in the shell.
+  if (process.env.DATABASE_URL) {
+    console.error(
+      "Refusing to run: DATABASE_URL is set, and the smoke test writes and deletes data.\n" +
+        "It is meant for a throwaway embedded database. Unset DATABASE_URL and try again.",
+    );
+    process.exit(1);
+  }
+
   // Always start from an empty database, so the assertions below describe the
   // code rather than whatever happened to be left over from the last run. Safe
   // to delete because PGLITE_DIR points somewhere disposable.
