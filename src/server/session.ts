@@ -4,10 +4,23 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
 
 const COOKIE = "vender_session";
-const MAX_AGE_SECONDS = 60 * 60 * 12; // One trading day.
+const MAX_AGE_SECONDS = 60 * 60 * 24 * 14; // Two weeks.
 
+/**
+ * What the signed cookie carries.
+ *
+ * `businessId` is the tenant boundary. Every query in the app is scoped to it,
+ * and it comes from here — from a value the server signed — never from a URL,
+ * a header, or anything else a request could choose for itself.
+ *
+ * `employeeId` is who is standing at the till, which is a separate question
+ * from who is signed in: an owner may sign in and then hand the counter to a
+ * cashier who identifies with a PIN.
+ */
 export type SessionPayload = {
-  employeeId: string;
+  userId: string;
+  businessId: string;
+  employeeId: string | null;
   registerId: string | null;
   /** Seconds since epoch. */
   issuedAt: number;
@@ -42,7 +55,9 @@ function decode(token: string | undefined): SessionPayload | null {
 
   try {
     const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as SessionPayload;
-    if (typeof payload.employeeId !== "string") return null;
+    // A token missing either identifier is not merely stale — it predates
+    // multi-tenancy, and honouring it would leave the tenant unresolved.
+    if (typeof payload.userId !== "string" || typeof payload.businessId !== "string") return null;
     if (Date.now() / 1000 - payload.issuedAt > MAX_AGE_SECONDS) return null;
     return payload;
   } catch {
@@ -55,9 +70,36 @@ export async function readSession(): Promise<SessionPayload | null> {
   return decode(jar.get(COOKIE)?.value);
 }
 
-export async function startSession(employeeId: string, registerId: string | null): Promise<void> {
+export async function startSession(payload: {
+  userId: string;
+  businessId: string;
+  employeeId?: string | null;
+  registerId?: string | null;
+}): Promise<void> {
+  await write({
+    userId: payload.userId,
+    businessId: payload.businessId,
+    employeeId: payload.employeeId ?? null,
+    registerId: payload.registerId ?? null,
+    issuedAt: Math.floor(Date.now() / 1000),
+  });
+}
+
+/**
+ * Change part of the session without re-authenticating — switching business,
+ * or picking who is at the till. Anything not named keeps its current value.
+ */
+export async function updateSession(
+  changes: Partial<Omit<SessionPayload, "issuedAt">>,
+): Promise<void> {
+  const current = await readSession();
+  if (!current) return;
+  await write({ ...current, ...changes });
+}
+
+async function write(payload: SessionPayload): Promise<void> {
   const jar = await cookies();
-  jar.set(COOKIE, encode({ employeeId, registerId, issuedAt: Math.floor(Date.now() / 1000) }), {
+  jar.set(COOKIE, encode(payload), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",

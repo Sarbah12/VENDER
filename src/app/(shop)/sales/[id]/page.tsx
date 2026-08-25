@@ -17,7 +17,10 @@ export const dynamic = "force-dynamic";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const receipt = await getReceipt(id);
+  const context = await getShopContext();
+  if (!context) return { title: "Sale" };
+
+  const receipt = await getReceipt(context.business.id, id);
   return { title: receipt ? `Receipt ${receipt.number}` : "Sale" };
 }
 
@@ -31,7 +34,7 @@ export default async function SaleDetailPage({
   const context = await getShopContext();
   if (!context) redirect("/setup");
 
-  const receipt = await getReceipt(id);
+  const receipt = await getReceipt(context.business.id, id);
   if (!receipt) notFound();
 
   const db = await getDb();

@@ -135,7 +135,7 @@ export async function checkout(input: CheckoutInput): Promise<CheckoutResult> {
       })),
     });
 
-    const receipt = await getReceipt(result.saleId);
+    const receipt = await getReceipt(context.business.id, result.saleId);
     if (!receipt) {
       return { ok: false, code: "receipt_missing", message: "The sale saved but the receipt could not be read." };
     }

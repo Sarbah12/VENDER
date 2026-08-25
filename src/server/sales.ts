@@ -73,6 +73,7 @@ export class SaleError extends Error {
       | "insufficient_stock"
       | "overpayment_without_cash"
       | "credit_requires_customer"
+      | "unknown_customer"
       | "unbalanced_ledger"
       | "missing_accounts",
     message: string,
@@ -193,6 +194,20 @@ async function runRecordSale(tx: Database, input: RecordSaleInput): Promise<Reco
       "credit_requires_customer",
       "A sale left unpaid has to be attached to a customer account.",
     );
+  }
+
+  // The customer id arrives from the till, so it is not to be trusted with a
+  // balance update until it is confirmed to belong to this business.
+  if (input.customerId) {
+    const [customer] = await tx
+      .select({ id: customers.id })
+      .from(customers)
+      .where(and(eq(customers.id, input.customerId), eq(customers.businessId, businessId)))
+      .limit(1);
+
+    if (!customer) {
+      throw new SaleError("unknown_customer", "That customer is not on this business's books.");
+    }
   }
 
   // ── 4. Mint the receipt number ──────────────────────────────────────────
@@ -325,7 +340,7 @@ async function runRecordSale(tx: Database, input: RecordSaleInput): Promise<Reco
     await tx
       .update(customers)
       .set({ balance: sql`${customers.balance} + ${settlement.balanceDue}` })
-      .where(eq(customers.id, input.customerId));
+      .where(and(eq(customers.id, input.customerId), eq(customers.businessId, businessId)));
   }
 
   return {

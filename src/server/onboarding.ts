@@ -1,8 +1,11 @@
 import "server-only";
 
+import { eq } from "drizzle-orm";
+
 import { getDb, type Database } from "@/db/client";
 import { accounts, branches, businesses, employees, registers, warehouses } from "@/db/schema";
 import { DEFAULT_CHART } from "@/domain/accounts";
+import { addMembership } from "./accounts";
 import { hashPin } from "./pin";
 
 /**
@@ -25,7 +28,10 @@ export type NewBusiness = {
   branchAddress: string | null;
   branchPhone: string | null;
   ownerName: string;
+  ownerEmail: string;
   ownerPin: string;
+  /** The login that will own this business. Created beforehand. */
+  userId: string;
 };
 
 export type OnboardingResult = { businessId: string; employeeId: string; registerId: string };
@@ -95,18 +101,20 @@ export async function createBusiness(input: NewBusiness): Promise<OnboardingResu
       })
       .returning({ id: registers.id });
 
-    const [owner] = await tx
-      .insert(employees)
-      .values({
-        businessId: business.id,
-        branchId: branch.id,
-        name: input.ownerName,
-        role: "owner",
-        pinHash,
-      })
-      .returning({ id: employees.id });
+    // The membership is what grants this account access to this business, and
+    // the staff record is what a sale gets attributed to. Both, or neither.
+    const employeeId = await addMembership(tx, {
+      userId: input.userId,
+      businessId: business.id,
+      branchId: branch.id,
+      role: "owner",
+      name: input.ownerName,
+      email: input.ownerEmail,
+    });
 
-    return { businessId: business.id, employeeId: owner.id, registerId: till.id };
+    await tx.update(employees).set({ pinHash }).where(eq(employees.id, employeeId));
+
+    return { businessId: business.id, employeeId, registerId: till.id };
   });
 }
 
@@ -119,9 +127,9 @@ function branchCode(name: string): string {
   return letters || "MAIN";
 }
 
-/** True when this database has no business yet, i.e. the app needs setting up. */
-export async function needsSetup(): Promise<boolean> {
-  const db = await getDb();
-  const [existing] = await db.select({ id: businesses.id }).from(businesses).limit(1);
-  return !existing;
-}
+/**
+ * There is deliberately no "does this installation need setting up" check any
+ * more. That question only made sense when one deployment meant one shop; now
+ * any number of businesses live here, and whether a *user* has one is answered
+ * by their memberships.
+ */

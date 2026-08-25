@@ -4,13 +4,12 @@ import { redirect } from "next/navigation";
 import { Wordmark } from "@/components/Brandmark";
 import { brand } from "@/lib/brand";
 import { getShopContext } from "@/server/context";
-import { SignInForm } from "./SignInForm";
+import { SignUpForm } from "./SignUpForm";
 
-export const metadata = { title: "Sign in" };
+export const metadata = { title: "Create an account" };
 export const dynamic = "force-dynamic";
 
-export default async function SignInPage() {
-  // Already signed in with a business resolved — nothing to do here.
+export default async function SignUpPage() {
   if (await getShopContext()) redirect("/pos");
 
   return (
@@ -18,15 +17,17 @@ export default async function SignInPage() {
       <div className="w-full max-w-sm animate-rise">
         <div className="mb-7 flex flex-col items-center gap-3 text-center">
           <Wordmark name={brand.name} size={34} />
-          <p className="text-sm text-muted">{brand.tagline}</p>
+          <p className="text-sm text-muted">
+            Create your account, then set up your shop. Takes a couple of minutes.
+          </p>
         </div>
 
-        <SignInForm />
+        <SignUpForm />
 
         <p className="mt-5 text-center text-[0.8125rem] text-muted">
-          New here?{" "}
-          <Link href="/sign-up" className="font-semibold text-brand hover:underline">
-            Create an account
+          Already have an account?{" "}
+          <Link href="/sign-in" className="font-semibold text-brand hover:underline">
+            Sign in
           </Link>
         </p>
       </div>

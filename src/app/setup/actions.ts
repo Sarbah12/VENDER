@@ -1,11 +1,15 @@
 "use server";
 
+import { eq } from "drizzle-orm";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
+import { getDb } from "@/db/client";
+import { users } from "@/db/schema";
 import { percentToBp } from "@/lib/money";
-import { createBusiness, needsSetup } from "@/server/onboarding";
-import { startSession } from "@/server/session";
+import { createBusiness } from "@/server/onboarding";
+import { readSession, startSession } from "@/server/session";
+import { endSignUpSession, readSignUpSession } from "@/server/signup-session";
 
 export type SetupState = { error?: string; fieldErrors?: Record<string, string> };
 
@@ -20,16 +24,25 @@ const SetupSchema = z.object({
   branchName: z.string().trim().min(1, "Name this shop or branch.").max(120),
   branchAddress: z.string().trim().max(200).optional(),
   branchPhone: z.string().trim().max(40).optional(),
-  ownerName: z.string().trim().min(1, "Who owns this?").max(120),
-  ownerPin: z.string().regex(/^\d{4}$/, "The PIN must be four digits."),
+  ownerPin: z.string().regex(/^\d{4}$/, "The till PIN must be four digits."),
   confirmPin: z.string().trim(),
 });
 
+/**
+ * Creates a business for whoever is signed in.
+ *
+ * The owner comes from the session — the signup cookie for someone who has just
+ * registered, or a full session for an existing user adding a second business.
+ * It is never taken from the form, which would let anyone create a business
+ * owned by someone else.
+ */
 export async function setUpBusiness(_prev: SetupState, formData: FormData): Promise<SetupState> {
-  // Guard the whole action, not just the page: a stale form left open must not
-  // be able to create a second business over the top of a live one.
-  if (!(await needsSetup())) {
-    return { error: "This installation is already set up." };
+  const session = await readSession();
+  const pendingUserId = await readSignUpSession();
+  const userId = session?.userId ?? pendingUserId;
+
+  if (!userId) {
+    return { error: "Your session ended. Sign in again to continue." };
   }
 
   const parsed = SetupSchema.safeParse(Object.fromEntries(formData));
@@ -43,7 +56,6 @@ export async function setUpBusiness(_prev: SetupState, formData: FormData): Prom
   }
 
   const data = parsed.data;
-
   if (data.ownerPin !== data.confirmPin) {
     return { error: "The two PINs do not match.", fieldErrors: { confirmPin: "These do not match." } };
   }
@@ -56,6 +68,10 @@ export async function setUpBusiness(_prev: SetupState, formData: FormData): Prom
     }
     taxRateBp = percentToBp(percent);
   }
+
+  const db = await getDb();
+  const [owner] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+  if (!owner) return { error: "Your session ended. Sign in again to continue." };
 
   let created;
   try {
@@ -70,16 +86,23 @@ export async function setUpBusiness(_prev: SetupState, formData: FormData): Prom
       branchName: data.branchName,
       branchAddress: data.branchAddress || null,
       branchPhone: data.branchPhone || null,
-      ownerName: data.ownerName,
+      ownerName: owner.name,
+      ownerEmail: owner.email,
       ownerPin: data.ownerPin,
+      userId,
     });
   } catch (error) {
     console.error("setUpBusiness failed", error);
     return { error: "The business could not be created. Nothing was saved." };
   }
 
-  // Sign the owner straight in — making them re-enter the PIN they just chose
-  // would be a pointless gate.
-  await startSession(created.employeeId, created.registerId);
+  await startSession({
+    userId,
+    businessId: created.businessId,
+    employeeId: created.employeeId,
+    registerId: created.registerId,
+  });
+  await endSignUpSession();
+
   redirect("/products/import?welcome=1");
 }

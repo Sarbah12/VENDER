@@ -27,6 +27,67 @@ const qty = (name: string) => numeric(name, { precision: 14, scale: 3, mode: "nu
 const id = () => uuid("id").primaryKey().defaultRandom();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
 
+/**
+ * Declared here rather than beside `employees` because memberships need it too,
+ * and a pgEnum is called at module load — it cannot be referenced before it
+ * exists the way a table reference can.
+ */
+export const employeeRole = pgEnum("employee_role", ["owner", "manager", "cashier", "stock_clerk"]);
+
+/* ──────────────────────────── Accounts ─────────────────────────────────── */
+
+/**
+ * A person who can sign in to the web app.
+ *
+ * Deliberately separate from `employees`. An employee is a staff record inside
+ * one business — it carries a till PIN and is what a sale is attributed to. A
+ * user is a login, and the same person may hold accounts across more than one
+ * business. A cashier who only ever stands at the till needs an employee record
+ * and no user at all.
+ */
+export const users = pgTable(
+  "users",
+  {
+    id: id(),
+    /** Always stored lower-cased; the unique index below is what enforces it. */
+    email: text("email").notNull(),
+    name: text("name").notNull(),
+    /** Scrypt, with a per-user salt. See src/server/passwords.ts. */
+    passwordHash: text("password_hash").notNull(),
+    emailVerifiedAt: timestamp("email_verified_at", { withTimezone: true }),
+    lastSignInAt: timestamp("last_sign_in_at", { withTimezone: true }),
+    isActive: boolean("is_active").notNull().default(true),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("users_email_uq").on(t.email)],
+);
+
+/**
+ * Which businesses a user may act in, and as what.
+ *
+ * This is the table tenant isolation hangs off: a request may only ever touch
+ * the business the signed-in user holds a membership for.
+ */
+export const memberships = pgTable(
+  "memberships",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    businessId: uuid("business_id")
+      .notNull()
+      .references(() => businesses.id, { onDelete: "cascade" }),
+    role: employeeRole("role").notNull().default("owner"),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("memberships_user_business_uq").on(t.userId, t.businessId),
+    index("memberships_user_idx").on(t.userId),
+    index("memberships_business_idx").on(t.businessId),
+  ],
+);
+
 /* ───────────────────────────── Organisation ───────────────────────────── */
 
 export const businesses = pgTable("businesses", {
@@ -78,8 +139,6 @@ export const warehouses = pgTable(
   (t) => [uniqueIndex("warehouses_business_code_uq").on(t.businessId, t.code)],
 );
 
-export const employeeRole = pgEnum("employee_role", ["owner", "manager", "cashier", "stock_clerk"]);
-
 export const employees = pgTable(
   "employees",
   {
@@ -88,6 +147,11 @@ export const employees = pgTable(
       .notNull()
       .references(() => businesses.id, { onDelete: "cascade" }),
     branchId: uuid("branch_id").references(() => branches.id, { onDelete: "set null" }),
+    /**
+     * The login this staff record belongs to, when there is one. Null for a
+     * cashier who only ever uses a PIN at the till and never signs in.
+     */
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
     name: text("name").notNull(),
     email: text("email"),
     phone: text("phone"),
@@ -101,7 +165,11 @@ export const employees = pgTable(
     isActive: boolean("is_active").notNull().default(true),
     createdAt: createdAt(),
   },
-  (t) => [index("employees_business_idx").on(t.businessId)],
+  (t) => [
+    index("employees_business_idx").on(t.businessId),
+    // One staff record per login per business.
+    uniqueIndex("employees_business_user_uq").on(t.businessId, t.userId),
+  ],
 );
 
 /* ─────────────────────────────── Catalogue ─────────────────────────────── */
@@ -607,6 +675,8 @@ export const auditLog = pgTable(
   (t) => [index("audit_log_business_idx").on(t.businessId, t.createdAt)],
 );
 
+export type User = typeof users.$inferSelect;
+export type Membership = typeof memberships.$inferSelect;
 export type Business = typeof businesses.$inferSelect;
 export type Branch = typeof branches.$inferSelect;
 export type Warehouse = typeof warehouses.$inferSelect;

@@ -10,6 +10,7 @@ import {
   categories,
   customers,
   employees,
+  memberships,
   journalEntries,
   journalLines,
   products,
@@ -17,10 +18,16 @@ import {
   stockLevels,
   stockMovements,
   suppliers,
+  users,
   warehouses,
 } from "./schema";
 import { DEFAULT_CHART } from "@/domain/accounts";
+import { hashPassword } from "@/server/passwords";
 import { hashPin } from "@/server/pin";
+
+/** Development credentials for the demo shop. Never created in production data. */
+export const DEMO_EMAIL = "ama@adomminimart.test";
+export const DEMO_PASSWORD = "demo-shop-password";
 
 /**
  * A demo shop with enough depth to exercise the whole chain: catalogue with
@@ -203,10 +210,24 @@ export async function seedDemoBusiness(db?: Database): Promise<{ businessId: str
       hashPin("3456"),
     ]);
 
+    // The owner gets a real login as well as a till PIN, so the demo shop can
+    // actually be signed into. The other two are PIN-only, which is the normal
+    // shape for counter staff.
+    const [ownerUser] = await tx
+      .insert(users)
+      .values({
+        email: DEMO_EMAIL,
+        name: "Ama Serwaa",
+        passwordHash: await hashPassword(DEMO_PASSWORD),
+      })
+      .returning({ id: users.id });
+
+    await tx.insert(memberships).values({ userId: ownerUser.id, businessId: bid, role: "owner" });
+
     const staff = await tx
       .insert(employees)
       .values([
-        { businessId: bid, branchId: branch.id, name: "Ama Serwaa", role: "owner", pinHash: ownerPin, phone: "+233 24 400 1122" },
+        { businessId: bid, branchId: branch.id, userId: ownerUser.id, name: "Ama Serwaa", email: DEMO_EMAIL, role: "owner", pinHash: ownerPin, phone: "+233 24 400 1122" },
         { businessId: bid, branchId: branch.id, name: "Kojo Mensah", role: "manager", pinHash: managerPin, phone: "+233 24 400 3344" },
         { businessId: bid, branchId: branch.id, name: "Efua Danso", role: "cashier", pinHash: cashierPin, phone: "+233 24 400 5566" },
       ])

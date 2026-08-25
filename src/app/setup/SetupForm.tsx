@@ -148,15 +148,12 @@ export function SetupForm() {
       </section>
 
       <section className="card p-5">
-        <h2 className="text-[0.9375rem] font-bold tracking-tight">Your login</h2>
+        <h2 className="text-[0.9375rem] font-bold tracking-tight">Your till PIN</h2>
         <p className="mt-1 text-[0.75rem] leading-relaxed text-muted">
-          A four-digit PIN opens the till. It identifies who rang up each sale — treat it as a till
-          code, not a password, and do not reuse a bank PIN.
+          Separate from the password you just chose. Four digits, entered at the counter to say who
+          rang up a sale — treat it as a till code, not a password, and do not reuse a bank PIN.
         </p>
-        <div className="mt-4 grid gap-4 sm:grid-cols-3">
-          <Field label="Your name" error={error("ownerName")}>
-            <input name="ownerName" required maxLength={120} className="input" />
-          </Field>
+        <div className="mt-4 grid gap-4 sm:grid-cols-2">
           <Field label="Till PIN" error={error("ownerPin")}>
             <input
               name="ownerPin"

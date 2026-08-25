@@ -1,6 +1,6 @@
 import "server-only";
 
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
 import { cache } from "react";
 
 import { getDb } from "@/db/client";
@@ -51,10 +51,14 @@ export type Receipt = {
 /**
  * Everything needed to print or re-print one sale.
  *
+ * `businessId` is required, not optional. The sale id comes from a URL, so
+ * without it any signed-in user could read any other shop's receipt — line
+ * items, customer, cashier, totals — by guessing or harvesting an id.
+ *
  * Wrapped in React's `cache` so a page and its `generateMetadata` share a single
  * read rather than querying the same sale twice per request.
  */
-export const getReceipt = cache(async (saleId: string): Promise<Receipt | null> => {
+export const getReceipt = cache(async (businessId: string, saleId: string): Promise<Receipt | null> => {
   const db = await getDb();
 
   const [row] = await db
@@ -70,7 +74,7 @@ export const getReceipt = cache(async (saleId: string): Promise<Receipt | null> 
     .innerJoin(branches, eq(branches.id, sales.branchId))
     .leftJoin(employees, eq(employees.id, sales.employeeId))
     .leftJoin(customers, eq(customers.id, sales.customerId))
-    .where(eq(sales.id, saleId))
+    .where(and(eq(sales.id, saleId), eq(sales.businessId, businessId)))
     .limit(1);
 
   if (!row) return null;
