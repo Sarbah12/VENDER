@@ -110,9 +110,18 @@ export const getShopContext = cache(async (): Promise<ShopContext | null> => {
   const tills = (row.registers ?? []).map((till) =>
     revive<typeof registers.$inferSelect>(till),
   );
-  const register = session.registerId
-    ? (tills.find((t) => t.id === session.registerId) ?? null)
-    : null;
+  /*
+   * Falling back to the only till when the session does not name one.
+   *
+   * Signing in does not pick a register — there is nothing to pick from until
+   * the business is known. Without this, a shop with one till would number its
+   * receipts T1-000001 in one session and S-000001 in the next, breaking the
+   * sequence for no reason the owner could see. With several tills the choice
+   * is genuine, so it stays unmade.
+   */
+  const register =
+    (session.registerId ? tills.find((t) => t.id === session.registerId) : undefined) ??
+    (tills.length === 1 ? tills[0] : null);
 
   return {
     user: revive(row.user),
