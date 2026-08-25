@@ -129,6 +129,31 @@ retention. If you would rather stay on free for now, take your own dumps — see
 
 `nano` compute is genuinely fine to start; a single shop will not trouble it.
 
+### Latency is the thing to watch
+
+Measured from Accra against a Supabase project in `eu-west-1`:
+
+| | |
+| --- | --- |
+| First connection (TLS + pooler handshake) | ~2,200ms |
+| Every query after that | **~197ms** |
+
+That number is the distance, not the database — Postgres answers in single-digit
+milliseconds; the rest is the round trip to Ireland. It has one blunt
+consequence: **the count of queries a page makes is its load time.** Six
+sequential queries is 1.2 seconds before anything renders.
+
+So `getShopContext()` — which runs before every page — deliberately gathers the
+membership, business, branch, warehouse, tills and employee in **one** query
+using sub-selects, rather than six readable ones. That is the single biggest
+performance decision in the app, and the reason to be wary of adding an
+innocent-looking `await db.select(...)` to a hot path.
+
+`vercel.json` pins functions to `dub1` (Dublin) for the same reason. Without it
+Vercel defaults to Washington DC, putting the Atlantic between every query and
+the database. **If you move the Supabase project to another region, change that
+line to match** — the two should always be neighbours.
+
 ### App (Vercel)
 
 1. Push this repository to GitHub and import it on Vercel.

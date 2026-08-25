@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { cache } from "react";
 
 import { getDb } from "@/db/client";
@@ -45,101 +45,126 @@ export const getShopContext = cache(async (): Promise<ShopContext | null> => {
 
   const db = await getDb();
 
-  const [account] = await db
-    .select({
-      user: users,
-      business: businesses,
-      role: memberships.role,
-    })
-    .from(memberships)
-    .innerJoin(users, eq(users.id, memberships.userId))
-    .innerJoin(businesses, eq(businesses.id, memberships.businessId))
-    .where(
-      and(
-        eq(memberships.userId, session.userId),
-        eq(memberships.businessId, session.businessId),
-        eq(users.isActive, true),
-      ),
-    )
-    .limit(1);
+  /*
+   * One round trip, not six.
+   *
+   * This runs before every page in the app, and the database is not next door —
+   * roughly 200ms away from a shop in Accra. Fetching the membership, then the
+   * branch, then the warehouse, then the tills, then the employee in sequence
+   * cost over a second before a page began rendering.
+   *
+   * They are gathered here as independent sub-selects so the network pays once.
+   * The membership check is still the gate: if the WHERE below matches nothing,
+   * nothing else is returned either.
+   */
+  const rows = await db.execute(sql`
+    select
+      to_jsonb(u.*)  as "user",
+      to_jsonb(b.*)  as "business",
+      m.role         as "role",
+      (
+        select to_jsonb(br.*) from ${branches} br
+        where br.business_id = b.id and br.is_active
+        order by br.created_at limit 1
+      ) as "branch",
+      (
+        select to_jsonb(w.*) from ${warehouses} w
+        where w.business_id = b.id
+          and w.branch_id = (
+            select br2.id from ${branches} br2
+            where br2.business_id = b.id and br2.is_active
+            order by br2.created_at limit 1
+          )
+        order by w.created_at limit 1
+      ) as "warehouse",
+      coalesce((
+        select jsonb_agg(to_jsonb(r.*) order by r.name) from ${registers} r
+        where r.business_id = b.id and r.is_active
+      ), '[]'::jsonb) as "registers",
+      (
+        select to_jsonb(e.*) from ${employees} e
+        where e.business_id = b.id and e.is_active
+          -- The session's employee if it is genuinely ours, otherwise this
+          -- user's own staff record, so an owner is attributed without picking
+          -- themselves first.
+          and (e.id = ${session.employeeId ?? null}::uuid or e.user_id = ${session.userId}::uuid)
+        order by (e.id = ${session.employeeId ?? null}::uuid) desc
+        limit 1
+      ) as "employee"
+    from ${memberships} m
+    join ${users} u on u.id = m.user_id
+    join ${businesses} b on b.id = m.business_id
+    where m.user_id = ${session.userId}::uuid
+      and m.business_id = ${session.businessId}::uuid
+      and u.is_active
+    limit 1
+  `);
+
+  const row = firstRow<RawContextRow>(rows);
 
   // No membership means the cookie is claiming access this user does not have.
-  if (!account) return null;
+  if (!row) return null;
+  // A business without a branch or a stockroom cannot be traded from.
+  if (!row.branch || !row.warehouse) return null;
 
-  const businessId = account.business.id;
-
-  const [branch] = await db
-    .select()
-    .from(branches)
-    .where(and(eq(branches.businessId, businessId), eq(branches.isActive, true)))
-    .orderBy(asc(branches.createdAt))
-    .limit(1);
-  if (!branch) return null;
-
-  const [warehouse] = await db
-    .select()
-    .from(warehouses)
-    .where(and(eq(warehouses.businessId, businessId), eq(warehouses.branchId, branch.id)))
-    .orderBy(asc(warehouses.createdAt))
-    .limit(1);
-  if (!warehouse) return null;
-
-  const tills = await db
-    .select()
-    .from(registers)
-    .where(and(eq(registers.businessId, businessId), eq(registers.isActive, true)))
-    .orderBy(asc(registers.name));
-
-  // Scoped to the business as well as the id: an employee id from another
-  // tenant must not resolve, however it got into the cookie.
-  let employee: (typeof employees.$inferSelect) | null = null;
-  if (session.employeeId) {
-    const [found] = await db
-      .select()
-      .from(employees)
-      .where(
-        and(
-          eq(employees.id, session.employeeId),
-          eq(employees.businessId, businessId),
-          eq(employees.isActive, true),
-        ),
-      )
-      .limit(1);
-    employee = found ?? null;
-  }
-
-  // Fall back to this user's own staff record, so an owner who signs in is
-  // attributed on the sales they ring up without picking themselves first.
-  if (!employee) {
-    const [own] = await db
-      .select()
-      .from(employees)
-      .where(
-        and(
-          eq(employees.businessId, businessId),
-          eq(employees.userId, session.userId),
-          eq(employees.isActive, true),
-        ),
-      )
-      .limit(1);
-    employee = own ?? null;
-  }
-
+  const tills = (row.registers ?? []).map((till) =>
+    revive<typeof registers.$inferSelect>(till),
+  );
   const register = session.registerId
     ? (tills.find((t) => t.id === session.registerId) ?? null)
     : null;
 
   return {
-    user: account.user,
-    business: account.business,
-    role: account.role,
-    branch,
-    warehouse,
+    user: revive(row.user),
+    business: revive(row.business),
+    role: row.role,
+    branch: revive(row.branch),
+    warehouse: revive(row.warehouse),
     registers: tills,
     register,
-    employee,
+    employee: row.employee ? revive(row.employee) : null,
   };
 });
+
+/**
+ * The two drivers disagree about what `execute` returns: postgres-js hands back
+ * an array of rows, PGlite an object with a `rows` property. Reading only one
+ * shape works locally and returns nothing in production — which for this
+ * function means every user silently failing to resolve a session.
+ */
+function firstRow<T>(result: unknown): T | undefined {
+  if (Array.isArray(result)) return result[0] as T | undefined;
+  const rows = (result as { rows?: unknown[] })?.rows;
+  return Array.isArray(rows) ? (rows[0] as T | undefined) : undefined;
+}
+
+type RawContextRow = {
+  user: Record<string, unknown>;
+  business: Record<string, unknown>;
+  role: ShopContext["role"];
+  branch: Record<string, unknown> | null;
+  warehouse: Record<string, unknown> | null;
+  registers: Array<Record<string, unknown>> | null;
+  employee: Record<string, unknown> | null;
+};
+
+/**
+ * jsonb gives back snake_case keys and ISO strings. Drizzle's own mapping does
+ * this for a normal select; doing it by hand is the cost of the single round
+ * trip above.
+ */
+function revive<T>(raw: Record<string, unknown>): T {
+  const out: Record<string, unknown> = {};
+
+  for (const [key, value] of Object.entries(raw)) {
+    const camel = key.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase());
+    out[camel] =
+      typeof value === "string" && TIMESTAMP.test(value) ? new Date(value) : value;
+  }
+  return out as T;
+}
+
+const TIMESTAMP = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}/;
 
 export type SignedInContext = ShopContext & {
   employee: NonNullable<ShopContext["employee"]>;
