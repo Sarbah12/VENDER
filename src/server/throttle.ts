@@ -1,53 +1,92 @@
 import "server-only";
 
+import { sql } from "drizzle-orm";
+
+import { getDb } from "@/db/client";
+import { rateLimits } from "@/db/schema";
+
 /**
- * A four-digit PIN falls to brute force in seconds without a limiter, so attempts
- * are counted per employee and the till locks out after a handful of misses.
+ * Rate limiting that survives a deploy and works across instances.
  *
- * The counters live in process memory, which is honest for a single-node
- * deployment and NOT sufficient once the app runs on more than one instance —
- * at that point this wants to move to Redis or a Postgres table.
+ * This used to be a Map in process memory, which on a serverless host barely
+ * limits anything: every instance keeps its own count, so an attacker spread
+ * across them gets a fresh allowance from each, and a deploy wipes the lot.
+ * Postgres is already on the critical path for every sign-in, so counting
+ * there costs one round trip and is actually shared.
  */
-const MAX_ATTEMPTS = 5;
 const WINDOW_MS = 5 * 60 * 1000;
-
-type Bucket = { count: number; firstAt: number };
-
-const globalBuckets = globalThis as unknown as { __venderThrottle?: Map<string, Bucket> };
-const buckets = (globalBuckets.__venderThrottle ??= new Map<string, Bucket>());
 
 export type ThrottleState = { allowed: boolean; remaining: number; retryInSeconds: number };
 
-export function checkAttempt(key: string): ThrottleState {
-  const now = Date.now();
-  const bucket = buckets.get(key);
+export const LIMITS = {
+  signin: 5,
+  signup: 5,
+  /** Reset requests are cheap to ask for and expensive to send, so tighter. */
+  password_reset: 3,
+  pin: 5,
+} as const;
 
-  if (!bucket || now - bucket.firstAt > WINDOW_MS) {
-    return { allowed: true, remaining: MAX_ATTEMPTS, retryInSeconds: 0 };
-  }
-  if (bucket.count >= MAX_ATTEMPTS) {
+export type LimitKind = keyof typeof LIMITS;
+
+/**
+ * Counts an attempt and reports whether it may proceed.
+ *
+ * One statement, so two simultaneous requests cannot both read "4 used" and
+ * both decide they are the fifth. The insert-or-increment resets the counter
+ * when the previous window has passed.
+ */
+export async function recordAttempt(kind: LimitKind, subject: string): Promise<ThrottleState> {
+  const key = `${kind}:${subject.toLowerCase()}`;
+  const max = LIMITS[kind];
+
+  try {
+    const db = await getDb();
+    const cutoff = new Date(Date.now() - WINDOW_MS);
+
+    const rows = await db
+      .insert(rateLimits)
+      .values({ key, count: 1, windowStartedAt: new Date() })
+      .onConflictDoUpdate({
+        target: rateLimits.key,
+        set: {
+          count: sql`case when ${rateLimits.windowStartedAt} < ${cutoff} then 1 else ${rateLimits.count} + 1 end`,
+          windowStartedAt: sql`case when ${rateLimits.windowStartedAt} < ${cutoff} then now() else ${rateLimits.windowStartedAt} end`,
+        },
+      })
+      .returning({ count: rateLimits.count, windowStartedAt: rateLimits.windowStartedAt });
+
+    const row = rows[0];
+    const used = row?.count ?? 1;
+    const startedAt = row?.windowStartedAt?.getTime() ?? Date.now();
+    const retryInSeconds = Math.max(0, Math.ceil((startedAt + WINDOW_MS - Date.now()) / 1000));
+
     return {
-      allowed: false,
-      remaining: 0,
-      retryInSeconds: Math.ceil((WINDOW_MS - (now - bucket.firstAt)) / 1000),
+      allowed: used <= max,
+      remaining: Math.max(0, max - used),
+      retryInSeconds: used <= max ? 0 : retryInSeconds,
     };
+  } catch (error) {
+    // A limiter that cannot reach the database must not lock everyone out of a
+    // working shop. Fail open, but loudly.
+    console.error("Rate limiter unavailable, allowing the attempt", error);
+    return { allowed: true, remaining: max, retryInSeconds: 0 };
   }
-  return { allowed: true, remaining: MAX_ATTEMPTS - bucket.count, retryInSeconds: 0 };
 }
 
-export function recordFailure(key: string): ThrottleState {
-  const now = Date.now();
-  const bucket = buckets.get(key);
-
-  if (!bucket || now - bucket.firstAt > WINDOW_MS) {
-    buckets.set(key, { count: 1, firstAt: now });
-    return { allowed: true, remaining: MAX_ATTEMPTS - 1, retryInSeconds: 0 };
+/** Called after a success, so a correct sign-in clears the failures before it. */
+export async function clearAttempts(kind: LimitKind, subject: string): Promise<void> {
+  try {
+    const db = await getDb();
+    await db.delete(rateLimits).where(sql`${rateLimits.key} = ${`${kind}:${subject.toLowerCase()}`}`);
+  } catch {
+    // Nothing depends on this: the window expires by itself.
   }
-
-  bucket.count += 1;
-  return checkAttempt(key);
 }
 
-export function clearAttempts(key: string): void {
-  buckets.delete(key);
+/** Removes windows that have long since passed. */
+export async function pruneRateLimits(): Promise<void> {
+  const db = await getDb();
+  await db
+    .delete(rateLimits)
+    .where(sql`${rateLimits.windowStartedAt} < ${new Date(Date.now() - 24 * 60 * 60 * 1000)}`);
 }

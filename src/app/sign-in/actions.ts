@@ -7,7 +7,7 @@ import { AccountError, authenticate } from "@/server/accounts";
 import { listMemberships } from "@/server/context";
 import { startSession } from "@/server/session";
 import { startSignUpSession } from "@/server/signup-session";
-import { checkAttempt, clearAttempts, recordFailure } from "@/server/throttle";
+import { clearAttempts, recordAttempt } from "@/server/throttle";
 
 export type SignInState = { error?: string };
 
@@ -27,12 +27,13 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
   }
 
   const email = parsed.data.email.toLowerCase();
-  const key = `signin:${email}`;
 
-  const throttle = checkAttempt(key);
+  // Counted before the attempt, not after a failure: otherwise an attacker gets
+  // one free guess per window and the expensive hash runs regardless.
+  const throttle = await recordAttempt("signin", email);
   if (!throttle.allowed) {
     return {
-      error: `Too many attempts. Try again in ${Math.ceil(throttle.retryInSeconds / 60)} minute(s).`,
+      error: `Too many attempts. Try again in ${Math.max(1, Math.ceil(throttle.retryInSeconds / 60))} minute(s).`,
     };
   }
 
@@ -41,12 +42,11 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
     user = await authenticate(email, parsed.data.password);
   } catch (error) {
     if (error instanceof AccountError) {
-      const state = recordFailure(key);
       // The same message for an unknown email and a wrong password: anything
       // else tells a stranger which addresses have accounts here.
       return {
         error:
-          state.remaining > 0
+          throttle.remaining > 0
             ? "That email and password do not match."
             : "Too many attempts. This account is locked for a few minutes.",
       };
@@ -54,7 +54,7 @@ export async function signIn(_prev: SignInState, formData: FormData): Promise<Si
     throw error;
   }
 
-  clearAttempts(key);
+  await clearAttempts("signin", email);
 
   const businesses = await listMemberships(user.id);
 

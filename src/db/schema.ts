@@ -88,6 +88,60 @@ export const memberships = pgTable(
   ],
 );
 
+export const authTokenKind = pgEnum("auth_token_kind", [
+  "email_verification",
+  "password_reset",
+  "invitation",
+]);
+
+/**
+ * Single-use, expiring tokens for the links sent by email.
+ *
+ * Only a SHA-256 of the token is stored. The plaintext exists in the email and
+ * nowhere else, so a leaked database cannot be used to reset anyone's password —
+ * which is precisely what a password-reset table is worth stealing for.
+ */
+export const authTokens = pgTable(
+  "auth_tokens",
+  {
+    id: id(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    kind: authTokenKind("kind").notNull(),
+    tokenHash: text("token_hash").notNull(),
+    /** For invitations: who is being invited, and to what. */
+    email: text("email"),
+    businessId: uuid("business_id").references(() => businesses.id, { onDelete: "cascade" }),
+    role: employeeRole("role"),
+    invitedByUserId: uuid("invited_by_user_id").references(() => users.id, { onDelete: "set null" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [
+    uniqueIndex("auth_tokens_hash_uq").on(t.tokenHash),
+    index("auth_tokens_user_kind_idx").on(t.userId, t.kind),
+    index("auth_tokens_expiry_idx").on(t.expiresAt),
+  ],
+);
+
+/**
+ * Rate-limit counters, in the database rather than in memory.
+ *
+ * In-process counters reset on every deploy and are per-instance, so on a
+ * serverless host they barely limit anything — an attacker spread across
+ * instances gets a fresh allowance from each. This is shared by all of them.
+ */
+export const rateLimits = pgTable(
+  "rate_limits",
+  {
+    /** e.g. "signin:someone@example.com" */
+    key: text("key").primaryKey(),
+    count: integer("count").notNull().default(0),
+    windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("rate_limits_window_idx").on(t.windowStartedAt)],
+);
+
 /* ───────────────────────────── Organisation ───────────────────────────── */
 
 export const businesses = pgTable("businesses", {

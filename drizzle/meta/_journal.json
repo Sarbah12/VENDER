@@ -36,6 +36,20 @@
       "when": 1787678321083,
       "tag": "0004_secure_new_tables",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787685144490,
+      "tag": "0005_auth_tokens_and_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787685145696,
+      "tag": "0006_secure_auth_tables",
+      "breakpoints": true
     }
   ]
 }

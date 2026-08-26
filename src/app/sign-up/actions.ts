@@ -5,7 +5,8 @@ import { z } from "zod";
 
 import { AccountError, createUser } from "@/server/accounts";
 import { checkPasswordStrength } from "@/server/passwords";
-import { checkAttempt, recordFailure } from "@/server/throttle";
+import { sendVerificationEmail } from "@/server/auth-flows";
+import { recordAttempt } from "@/server/throttle";
 import { startSignUpSession } from "@/server/signup-session";
 
 export type SignUpState = { error?: string; fieldErrors?: Record<string, string> };
@@ -36,7 +37,7 @@ export async function signUp(_prev: SignUpState, formData: FormData): Promise<Si
 
   // Rate limited by email so signup cannot be used to enumerate or to grind
   // through the expensive password hash.
-  const throttle = checkAttempt(`signup:${email.toLowerCase()}`);
+  const throttle = await recordAttempt("signup", email);
   if (!throttle.allowed) {
     return { error: "Too many attempts. Try again in a few minutes." };
   }
@@ -49,7 +50,6 @@ export async function signUp(_prev: SignUpState, formData: FormData): Promise<Si
     userId = await createUser({ email, name, password });
   } catch (error) {
     if (error instanceof AccountError && error.code === "email_taken") {
-      recordFailure(`signup:${email.toLowerCase()}`);
       return {
         error: "There is already an account with that email.",
         fieldErrors: { email: "Already registered — sign in instead." },
@@ -58,6 +58,10 @@ export async function signUp(_prev: SignUpState, formData: FormData): Promise<Si
     console.error("signUp failed", error);
     return { error: "The account could not be created. Nothing was saved." };
   }
+
+  // Best effort: a bounced welcome email must not stop the account being made.
+  // The address can be confirmed later from settings.
+  await sendVerificationEmail(userId);
 
   // Signed in, but with no business yet — the next step creates one.
   await startSignUpSession(userId);
