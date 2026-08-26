@@ -19,7 +19,8 @@
     "db:setup": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/db-setup.ts",
     "tenancy": "PGLITE_DIR=.data/tenancy NODE_OPTIONS=--conditions=react-server tsx scripts/tenancy.ts",
     "db:verify": "node --conditions=react-server --env-file-if-exists=.env.local --import tsx scripts/verify-live.ts",
-    "auth": "PGLITE_DIR=.data/auth NODE_OPTIONS=--conditions=react-server tsx scripts/auth.ts"
+    "auth": "PGLITE_DIR=.data/auth NODE_OPTIONS=--conditions=react-server tsx scripts/auth.ts",
+    "invitations": "PGLITE_DIR=.data/invites NODE_OPTIONS=--conditions=react-server tsx scripts/invitations.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.7",
